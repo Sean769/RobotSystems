@@ -3,21 +3,26 @@ import os
 import math
 try:
     from robot_hat import Pin, ADC, PWM, Servo, fileDB
-    from robot_hat import Grayscale_Module, Ultrasonic
-    from robot_hat.utils import reset_mcu, run_command
+    from robot_hat import Grayscale_Module, Ultrasonic, utils
 except ImportError:
+    import sys
+    sys.path.append(os.path.abspath(os.path.join(
+        os.path.dirname(__file__), "..")))
     from sim_robot_hat import Pin, ADC, PWM, Servo, fileDB
-    from sim_robot_hat import Grayscale_Module, Ultrasonic
-    from sim_robot_hat import reset_mcu, run_command
+    from sim_robot_hat import Grayscale_Module, Ultrasonic, utils
+import time
 import logging
 import atexit
+
 import logging
 
+# Configure logging
 logging_format = "%(asctime)s: %(message)s"
-logging.basicConfig(format=logging_format, level=logging.INFO,
-datefmt="%H:%M:%S")
+logging.basicConfig(format=logging_format, level=logging.INFO, datefmt="%H:%M:%S")
+logger = logging.getLogger()
+logger.setLevel(logging.DEBUG)
 
-reset_mcu()
+utils.reset_mcu()
 time.sleep(0.2)
 
 
@@ -60,6 +65,11 @@ class Picarx(object):
         # reset robot_hat
         utils.reset_mcu()
         time.sleep(0.2)
+
+        # Register the stop function to ensure motors stop on program exit
+        atexit.register(self.stop)
+        logger.info("Registered stop function with atexit.")
+
 
         # --------- config_flie ---------
         self.config_flie = fileDB(config, 777, os.getlogin())
@@ -109,6 +119,12 @@ class Picarx(object):
         trig, echo= ultrasonic_pins
         self.ultrasonic = Ultrasonic(Pin(trig), Pin(echo, mode=Pin.IN, pull=Pin.PULL_DOWN))
         
+        try:
+            logger.info("Picarx initialized successfully.")
+        except Exception as e:
+            logger.error(f"Error initializing Picarx: {e}")
+            raise
+        
     def set_motor_speed(self, motor, speed):
         ''' set motor speed
         
@@ -126,7 +142,7 @@ class Picarx(object):
         speed = abs(speed)
         # print(f"direction: {direction}, speed: {speed}")
         if speed != 0:
-            speed = int(speed /2 ) + 50
+            speed = abs(speed)  # Ensure speed is positive
         speed = speed - self.cali_speed_value[motor]
         if direction < 0:
             self.motor_direction_pins[motor].high()
@@ -134,6 +150,11 @@ class Picarx(object):
         else:
             self.motor_direction_pins[motor].low()
             self.motor_speed_pins[motor].pulse_width_percent(speed)
+        try:
+            logger.info("Motor Speed Set.")
+        except Exception as e:
+            logger.error(f"Error Setting Motor Speed: {e}")
+            raise
 
     def motor_speed_calibration(self, value):
         self.cali_speed_value = value
@@ -192,38 +213,44 @@ class Picarx(object):
         self.set_motor_speed(2, speed)
 
     def backward(self, speed):
+    
+    #Move the car backward at the given speed with Ackerman steering.
+    
+    #:param speed: Speed percentage (-100 to 100).
+    
         current_angle = self.dir_current_angle
         if current_angle != 0:
-            abs_current_angle = abs(current_angle)
-            if abs_current_angle > self.DIR_MAX:
-                abs_current_angle = self.DIR_MAX
-            power_scale = (100 - abs_current_angle) / 100.0 
-            if (current_angle / abs_current_angle) > 0:
-                self.set_motor_speed(1, -1*speed)
-                self.set_motor_speed(2, speed * power_scale)
-            else:
-                self.set_motor_speed(1, -1*speed * power_scale)
-                self.set_motor_speed(2, speed )
+        # Calculate left and right motor speeds using Ackerman steering
+            left_speed = -speed * math.cos(math.radians(current_angle))
+            right_speed = -speed * math.cos(math.radians(-current_angle))
+            self.set_motor_speed(1, left_speed)
+            self.set_motor_speed(2, right_speed)
+            logger.debug(f"Backward: Left speed {left_speed}, Right speed {right_speed}.")
         else:
-            self.set_motor_speed(1, -1*speed)
-            self.set_motor_speed(2, speed)  
+            self.set_motor_speed(1, -speed)
+            self.set_motor_speed(2, -speed)
+            logger.debug(f"Backward: Both motors set to speed {-speed}.")
+
 
     def forward(self, speed):
+    
+    #Move the car forward at the given speed with Ackerman steering.
+    
+    #:param speed: Speed percentage (-100 to 100).
+    
         current_angle = self.dir_current_angle
         if current_angle != 0:
-            abs_current_angle = abs(current_angle)
-            if abs_current_angle > self.DIR_MAX:
-                abs_current_angle = self.DIR_MAX
-            power_scale = (100 - abs_current_angle) / 100.0
-            if (current_angle / abs_current_angle) > 0:
-                self.set_motor_speed(1, 1*speed * power_scale)
-                self.set_motor_speed(2, -speed) 
-            else:
-                self.set_motor_speed(1, speed)
-                self.set_motor_speed(2, -1*speed * power_scale)
+        # Calculate left and right motor speeds using Ackerman steering
+            left_speed = speed * math.cos(math.radians(current_angle))
+            right_speed = speed * math.cos(math.radians(-current_angle))
+            self.set_motor_speed(1, left_speed)
+            self.set_motor_speed(2, right_speed)
+            logger.debug(f"Forward: Left speed {left_speed}, Right speed {right_speed}.")
         else:
             self.set_motor_speed(1, speed)
-            self.set_motor_speed(2, -1*speed)                  
+            self.set_motor_speed(2, speed)
+            logger.debug(f"Forward: Both motors set to speed {speed}.")
+     
 
     def stop(self):
         '''
@@ -233,6 +260,11 @@ class Picarx(object):
             self.motor_speed_pins[0].pulse_width_percent(0)
             self.motor_speed_pins[1].pulse_width_percent(0)
             time.sleep(0.002)
+        try:
+            logger.info("Picarx Stopped.")
+        except Exception as e:
+            logger.error(f"Error Stopping Picarx: {e}")
+            raise
 
     def get_distance(self):
         return self.ultrasonic.read()
