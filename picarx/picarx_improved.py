@@ -305,6 +305,80 @@ class Picarx(object):
         self.set_cam_tilt_angle(0)
         self.set_cam_pan_angle(0)
 
+class PicarxManeuvers:
+    def __init__(self):
+        self.car = Picarx()
+
+    def move_forward(self, speed=50, duration=1, angle=0):
+        """Move forward in a straight line or with a steering angle."""
+        self.car.set_dir_servo_angle(angle)
+        self.car.forward(speed)
+        time.sleep(duration)
+        self.car.stop()
+
+    def move_backward(self, speed=50, duration=1, angle=0):
+        """Move backward in a straight line or with a steering angle."""
+        self.car.set_dir_servo_angle(angle)
+        self.car.backward(speed)
+        time.sleep(duration)
+        self.car.stop()
+
+    def parallel_park_left(self, speed=50, duration=1):
+        """Perform a parallel park maneuver to the left."""
+        self.car.set_dir_servo_angle(-30)  # Turn wheels left
+        self.car.backward(speed)
+        time.sleep(duration)
+
+        self.car.set_dir_servo_angle(30)  # Turn wheels right
+        self.car.forward(speed)
+        time.sleep(duration)
+
+        self.car.stop()
+
+    def parallel_park_right(self, speed=50, duration=1):
+        """Perform a parallel park maneuver to the right."""
+        self.car.set_dir_servo_angle(30)  # Turn wheels right
+        self.car.backward(speed)
+        time.sleep(duration)
+
+        self.car.set_dir_servo_angle(-30)  # Turn wheels left
+        self.car.forward(speed)
+        time.sleep(duration)
+
+        self.car.stop()
+
+    def three_point_turn_left(self, speed=50, duration=1):
+        """Perform a three-point turn starting with a left turn."""
+        self.car.set_dir_servo_angle(30)  # Turn wheels left
+        self.car.forward(speed)
+        time.sleep(duration)
+
+        self.car.set_dir_servo_angle(-30)  # Turn wheels right
+        self.car.backward(speed)
+        time.sleep(duration)
+
+        self.car.set_dir_servo_angle(0)  # Straighten wheels
+        self.car.forward(speed)
+        time.sleep(duration)
+
+        self.car.stop()
+
+    def three_point_turn_right(self, speed=50, duration=1):
+        """Perform a three-point turn starting with a right turn."""
+        self.car.set_dir_servo_angle(-30)  # Turn wheels right
+        self.car.forward(speed)
+        time.sleep(duration)
+
+        self.car.set_dir_servo_angle(30)  # Turn wheels left
+        self.car.backward(speed)
+        time.sleep(duration)
+
+        self.car.set_dir_servo_angle(0)  # Straighten wheels
+        self.car.forward(speed)
+        time.sleep(duration)
+
+        self.car.stop()
+
 if __name__ == "__main__":
     px = Picarx()
     px.forward(50)
