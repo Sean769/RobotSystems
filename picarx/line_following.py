@@ -13,7 +13,7 @@ def line_following():
     car = Picarx()
     sensor = GrayscaleSensor()
     interpreter = LineInterpreter(sensitivity=300, polarity="dark")
-    controller = SteeringController(car, scale=30)
+    controller = SteeringController(car, scale=10)
 
     try:
         logger.info("Starting line-following.")

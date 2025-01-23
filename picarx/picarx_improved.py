@@ -330,7 +330,7 @@ class PicarxManeuvers:
         time.sleep(duration)
 
         self.car.set_dir_servo_angle(30)  # Turn wheels right
-        self.car.forward(speed)
+        self.car.backward(speed)
         time.sleep(duration)
 
         self.car.stop()
@@ -342,18 +342,18 @@ class PicarxManeuvers:
         time.sleep(duration)
 
         self.car.set_dir_servo_angle(-30)  # Turn wheels left
-        self.car.forward(speed)
+        self.car.backward(speed)
         time.sleep(duration)
 
         self.car.stop()
 
     def three_point_turn_left(self, speed=50, duration=1):
         """Perform a three-point turn starting with a left turn."""
-        self.car.set_dir_servo_angle(30)  # Turn wheels left
+        self.car.set_dir_servo_angle(-30)  # Turn wheels left
         self.car.forward(speed)
         time.sleep(duration)
 
-        self.car.set_dir_servo_angle(-30)  # Turn wheels right
+        self.car.set_dir_servo_angle(30)  # Turn wheels right
         self.car.backward(speed)
         time.sleep(duration)
 
@@ -365,11 +365,11 @@ class PicarxManeuvers:
 
     def three_point_turn_right(self, speed=50, duration=1):
         """Perform a three-point turn starting with a right turn."""
-        self.car.set_dir_servo_angle(-30)  # Turn wheels right
+        self.car.set_dir_servo_angle(30)  # Turn wheels right
         self.car.forward(speed)
         time.sleep(duration)
 
-        self.car.set_dir_servo_angle(30)  # Turn wheels left
+        self.car.set_dir_servo_angle(-30)  # Turn wheels left
         self.car.backward(speed)
         time.sleep(duration)
 
