@@ -18,7 +18,7 @@ config = {
     "turn_angle": 45,
     "shift_max": 20,
     "shift_step": 0.125,
-    "turn_step": 0.25,
+    "turn_step": 0.5,
     "straight_run": 0.5,
 }
 
@@ -78,36 +78,32 @@ def check_shift_turn(angle, shift, config):
 
     return turn_state, shift_state
 
-def get_turn(turn_state, shift_state, config):
+def get_turn(turn_state, shift, config):
     """
-    Determine the turn direction and value based on the turn and shift states.
+    Determine the turn direction and value dynamically based on the shift and angle.
     """
-    turn_dir = 0
-    turn_val = 0
-    if shift_state != 0:
-        turn_dir = shift_state
-        turn_val = config["shift_step"] if shift_state != turn_state else config["turn_step"]
-    elif turn_state != 0:
-        turn_dir = turn_state
-        turn_val = config["turn_step"]
+    turn_dir = np.sign(shift) if shift != 0 else 0
+    turn_val = np.clip(abs(shift) / config["shift_max"], 0.1, config["turn_step"])
     return turn_dir, turn_val
 
-def control_car(turn_dir, turn_val, last_turn_dir):
+def control_car(turn_dir, turn_val, shift, config):
     """
-    Control the car's movement based on turn direction and value.
+    Dynamically control the car's movement based on turn direction, value, and shift.
     """
     if turn_dir != 0:
-        car.set_dir_servo_angle(turn_dir * 30)  # Scale the turn direction for steering
-        print(f"Turning {'left' if turn_dir > 0 else 'right'}, turn value: {turn_val}")
-        car.forward(30)  # Move forward while turning
+        # Dynamic steering based on shift
+        steering_angle = np.clip(shift / config["shift_max"] * 30, -30, 30)
+        car.set_dir_servo_angle(steering_angle)
+        print(f"Turning {'left' if turn_dir > 0 else 'right'}, steering angle: {steering_angle:.2f}, turn value: {turn_val:.2f}")
+        car.forward(20)  # Move forward while turning (reduced speed for sharp turns)
         sleep(turn_val)
         return turn_dir
     else:
         car.set_dir_servo_angle(0)
         print("Moving straight")
-        car.forward(30)
+        car.forward(30)  # Normal speed for straight movement
         sleep(config["straight_run"])
-        return last_turn_dir
+        return 0
 
 def main():
     global last_turn_dir
@@ -117,47 +113,42 @@ def main():
 
     try:
         while True:
+            frame = picam2.capture_array()
+            if frame is None:
+                print("Failed to grab frame")
+                continue
+
+            # Preprocess the frame
+            gray = cv.cvtColor(frame, cv.COLOR_RGB2GRAY)
+            blurred = cv.GaussianBlur(gray, (9, 9), 0)
+            thresholded = balance_pic(blurred, config)
+            box = find_main_contour(thresholded)
+
+            if box is not None:
+                # Line detected, calculate steering
+                angle, shift = get_vector(box, frame.shape[1])
+                print(f"Angle: {angle:.2f}, Shift: {shift:.2f}")
+                turn_state, shift_state = check_shift_turn(angle, shift, config)
+                turn_dir, turn_val = get_turn(turn_state, shift, config)
+                last_turn_dir = control_car(turn_dir, turn_val, shift, config)
+
+                # Visualization: Draw the bounding box and center
+                cv.drawContours(frame, [box], -1, (0, 255, 0), 2)
+                cv.line(frame, (frame.shape[1] // 2, 0), (frame.shape[1] // 2, frame.shape[0]), (255, 0, 0), 2)
+            else:
+                # Line lost, steer hard in the last known direction
+                print("Line lost, steering hard in last known direction")
+                car.set_dir_servo_angle(last_turn_dir * 45)
+                car.forward(30)
+                sleep(config["turn_step"])
+
+            # Display the processed frame
             try:
-                frame = picam2.capture_array()
-                if frame is None:
-                    print("Failed to grab frame")
-                    continue
-
-                # Preprocess the frame
-                gray = cv.cvtColor(frame, cv.COLOR_RGB2GRAY)
-                blurred = cv.GaussianBlur(gray, (9, 9), 0)
-                thresholded = balance_pic(blurred, config)
-                box = find_main_contour(thresholded)
-
-                if box is not None:
-                    # Line detected, calculate steering
-                    angle, shift = get_vector(box, frame.shape[1])
-                    print(f"Angle: {angle:.2f}, Shift: {shift:.2f}")
-                    turn_state, shift_state = check_shift_turn(angle, shift, config)
-                    turn_dir, turn_val = get_turn(turn_state, shift_state, config)
-                    last_turn_dir = control_car(turn_dir, turn_val, last_turn_dir)
-
-                    # Visualization: Draw the bounding box and center
-                    cv.drawContours(frame, [box], -1, (0, 255, 0), 2)
-                    cv.line(frame, (frame.shape[1] // 2, 0), (frame.shape[1] // 2, frame.shape[0]), (255, 0, 0), 2)
-                else:
-                    # Line lost, steer hard in the last known direction
-                    print("Line lost, steering hard in last known direction")
-                    car.set_dir_servo_angle(last_turn_dir * 45)
-                    car.forward(30)
-                    sleep(config["turn_step"])
-
-                # Display the processed frame (try to show it)
-                try:
-                    cv.imshow("Processed Frame", frame)
-                    if cv.waitKey(1) & 0xFF == ord("q"):
-                        break
-                except cv.error:
-                    print("No display available for visualization.")
-
-            except Exception as e:
-                print(f"Error during frame processing: {e}")
-                car.stop()
+                cv.imshow("Processed Frame", frame)
+                if cv.waitKey(1) & 0xFF == ord("q"):
+                    break
+            except cv.error:
+                print("No display available for visualization.")
 
     except KeyboardInterrupt:
         print("Program interrupted")
