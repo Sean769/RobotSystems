@@ -34,7 +34,9 @@ config = {
     "moderate_turn": 15,
     "sharp_turn": 30,
     "angle_threshold": 20,
+    "ultrasonic_threshold": 10  
 }
+
 
 # --------------------------
 # Global Shutdown Event
@@ -59,7 +61,6 @@ class MessageBus:
 
 # --------------------------
 # Image Processing Functions
-# (from your base code)
 # --------------------------
 def balance_pic(image, config):
     T = config["threshold"]
@@ -105,6 +106,7 @@ def check_shift_turn(angle, shift, config):
             turn_strength = config["moderate_turn"]
     shift_state = np.sign(shift) if abs(shift) > config["shift_max"] else 0
     return turn_strength, shift_state
+
 
 def control_car(car, turn_strength, shift_state, config):
     # Compute the turning angle; if no shift, go straight.
@@ -166,16 +168,21 @@ def control_function(car, interpreter_bus, control_delay):
     Read control parameters from interpreter_bus and command the car.
     """
     while not shutdown_event.is_set():
-        command = interpreter_bus.read()
-        if command is not None:
-            turn_strength, shift_state = command
-            # If both parameters are zero, it may indicate a stop condition.
-            if turn_strength == 0 and shift_state == 0:
-                logger.info("Control: No valid line detected; stopping car.")
-                car.stop()
-            else:
-                logger.debug("Control: Executing control command.")
-                control_car(car, turn_strength, shift_state, config)
+        # Read distance from the ultrasonic sensor
+        distance = car.get_distance()
+        if distance is not None and distance < config.get("ultrasonic_threshold", 20):
+            logger.info(f"Ultrasonic: Object detected at {distance} cm. Stopping car.")
+            car.stop()
+        else:
+            command = interpreter_bus.read()
+            if command is not None:
+                turn_strength, shift_state = command
+                if turn_strength == 0 and shift_state == 0:
+                    logger.info("Control: No valid line detected; stopping car.")
+                    car.stop()
+                else:
+                    logger.debug("Control: Executing control command.")
+                    control_car(car, turn_strength, shift_state, config)
         sleep(control_delay)
 
 # --------------------------
@@ -184,7 +191,7 @@ def control_function(car, interpreter_bus, control_delay):
 def main():
     # Initialize the car and camera
     car = Picarx()
-    car.set_cam_tilt_angle(45)
+    car.set_cam_tilt_angle(-60)
     picam2 = Picamera2()
     camera_config = picam2.create_preview_configuration(main={"size": (640, 480)})
     picam2.configure(camera_config)
@@ -194,9 +201,9 @@ def main():
     sensor_bus = MessageBus()
     interpreter_bus = MessageBus()
 
-    # Define delay times (in seconds) for each thread
-    sensor_delay = 0.1       # how often to capture a frame
-    interpreter_delay = 0.1  # how fast to process sensor data
+    # Define delay times for each thread
+    sensor_delay = 0.05       # how often to capture a frame
+    interpreter_delay = 0.05  # how fast to process sensor data
     control_delay = 0.1      # how fast to update control commands
 
     # Use ThreadPoolExecutor to run tasks concurrently
