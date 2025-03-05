@@ -212,9 +212,11 @@ class MotionController:
         self.unreachable = False
 
     def init_arm(self):
+        print("Initializing arm to starting position...")
         Board.setBusServoPulse(1, self.servo1 - 50, 300)
         Board.setBusServoPulse(2, 500, 500)
         self.AK.setPitchRangeMoving((0, 10, 10), -30, -30, -90, 1500)
+        time.sleep(1)  # Extra delay to ensure arm reaches the initial position
 
     def set_buzzer(self, duration):
         Board.setBuzzer(0)
@@ -225,33 +227,29 @@ class MotionController:
     def move_to_block(self, world_coords):
         x, y = world_coords
         print("Moving arm to block position:", world_coords)
-        # Move to the block position – note: adjust the Z value as needed.
+        # Move to the block's position; adjust Z value if needed.
         result = self.AK.setPitchRangeMoving((x, y, 5), -90, -90, 0)
         if result:
-            time.sleep(result[2] / 1000)
+            sleep_time = result[2] / 1000.0
+            print("Waiting", sleep_time, "seconds for move_to_block to complete")
+            time.sleep(sleep_time + 1)  # Extra delay added for settling
         else:
             self.unreachable = True
 
-    def perform_pick_and_place(self, world_coords, detected_color, rotation_angle):
-        if detected_color is None or world_coords is None:
-            return
-        print("Navigating to block at", world_coords)
-        self.move_to_block(world_coords)   # Now explicitly moves to the block's coordinates.
-        print("Executing pick-up sequence...")
-        self.pick_block(world_coords, rotation_angle)
-        print("Moving to deposit position and releasing block...")
-        self.place_block(detected_color)
-
-
     def pick_block(self, world_coords, rotation_angle):
+        print("Executing pick-up sequence at:", world_coords)
         Board.setBusServoPulse(1, self.servo1 - 280, 500)
         servo2_angle = getAngle(world_coords[0], world_coords[1], rotation_angle)
+        print("Setting servo2 to angle:", servo2_angle)
         Board.setBusServoPulse(2, servo2_angle, 500)
         time.sleep(0.8)
+        print("Lowering arm to pick block...")
         self.AK.setPitchRangeMoving((world_coords[0], world_coords[1], 2), -90, -90, 0, 1000)
         time.sleep(2)
+        print("Closing gripper to pick block...")
         Board.setBusServoPulse(1, self.servo1, 500)
         time.sleep(1)
+        print("Lifting arm with block...")
         Board.setBusServoPulse(2, 500, 500)
         self.AK.setPitchRangeMoving((world_coords[0], world_coords[1], 12), -90, -90, 0, 1000)
         time.sleep(1)
@@ -259,9 +257,12 @@ class MotionController:
     def place_block(self, color, custom_z=None):
         coord = self.placement_coords[color]
         target_z = custom_z if custom_z is not None else coord[2]
+        print("Moving to deposit position for", color, "block at Z =", target_z)
         result = self.AK.setPitchRangeMoving((coord[0], coord[1], 12), -90, -90, 0)
         if result:
-            time.sleep(result[2] / 1000)
+            sleep_time = result[2] / 1000.0
+            print("Waiting", sleep_time, "seconds for move to deposit position")
+            time.sleep(sleep_time + 0.5)
         servo2_angle = getAngle(coord[0], coord[1], -90)
         Board.setBusServoPulse(2, servo2_angle, 500)
         time.sleep(0.5)
@@ -269,12 +270,21 @@ class MotionController:
         time.sleep(0.5)
         self.AK.setPitchRangeMoving((coord[0], coord[1], target_z), -90, -90, 0, 1000)
         time.sleep(0.8)
+        print("Opening gripper to release block...")
         Board.setBusServoPulse(1, self.servo1 - 200, 500)
         time.sleep(0.8)
         self.AK.setPitchRangeMoving((coord[0], coord[1], 12), -90, -90, 0, 800)
         time.sleep(0.8)
+        print("Returning arm to initial position...")
         self.init_arm()
-        time.sleep(1.5)
+
+    def perform_pick_and_place(self, world_coords, detected_color, rotation_angle):
+        if detected_color is None or world_coords is None:
+            return
+        print("Performing pick-and-place for", detected_color, "block at", world_coords)
+        self.move_to_block(world_coords)
+        self.pick_block(world_coords, rotation_angle)
+        self.place_block(detected_color)
 
     def perform_stack(self, world_coords, detected_color, rotation_angle):
         if detected_color is None or world_coords is None:
@@ -314,7 +324,7 @@ if __name__ == '__main__':
     my_camera = Camera.Camera()
     my_camera.camera_open()
 
-    print("Automatically executing protocol upon detection; press ESC to exit.")
+    print("Automatically executing protocol upon stable detection; press ESC to exit.")
     while True:
         frame = my_camera.frame
         if frame is not None:
@@ -327,9 +337,9 @@ if __name__ == '__main__':
                     motion.perform_pick_and_place(world_coords, detected_color, rotation_angle)
                 elif OPERATION_MODE == "stacking":
                     motion.perform_stack(world_coords, detected_color, rotation_angle)
-                # Wait a moment after an operation to avoid repeated triggers.
+                # Extra delay to avoid repeated triggering for the same block.
                 time.sleep(2)
-        if cv2.waitKey(1) == 27:  # ESC key to exit.
+        if cv2.waitKey(1) == 27:
             break
 
     my_camera.camera_close()
