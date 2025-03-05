@@ -1,12 +1,20 @@
 #!/usr/bin/python3
+# coding=utf8
+import sys
+sys.path.append('/home/pi/ArmPi/')
 import cv2
+import time
+import threading
 import numpy as np
 import math
-import time
-import Camera  # Your custom Camera module
+import Camera
+from LABConfig import *
+from ArmIK.Transform import *
+from ArmIK.ArmMoveIK import *
+import HiwonderSDK.Board as Board
+from CameraCalibration.CalibrationConfig import *
 
-# For demonstration, we supply dummy implementations.
-# In your actual system, these should come from your calibration modules.
+# Dummy implementations (replace with your calibration functions)
 def getROI(box):
     # Dummy: simply return the box as the region of interest.
     return box
@@ -21,6 +29,9 @@ def convertCoordinate(img_centerx, img_centery, size):
     world_x = (img_centerx - img_w / 2) * 10 / img_w
     world_y = (img_centery - img_h / 2) * 10 / img_h
     return (round(world_x, 2), round(world_y, 2))
+
+# Global gripper servo value
+SERVO1 = 500
 
 # ---------------------------
 # Extended Perception Class
@@ -86,16 +97,11 @@ class ExtendedBlockDetector:
         annotated_img = img.copy()
         preprocessed = self.preprocess_image(img, size)
         lab_img = self.convert_to_lab(preprocessed)
-        detected = False
-        world_coordinates = None
         detected_color = None
-        rotation_angle = 0
-
         best_area = 0
         best_rect = None
-        best_color = None
 
-        # Loop through all target colors and keep the detection with the largest area.
+        # Loop over all target colors and keep the detection with the largest area.
         for color in self.target_colors:
             mask = self.generate_color_mask(lab_img, color)
             contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
@@ -103,20 +109,19 @@ class ExtendedBlockDetector:
             if largest_contour is not None and area > 2500 and area > best_area:
                 best_area = area
                 best_rect = cv2.minAreaRect(largest_contour)
-                best_color = color
+                detected_color = color
 
+        world_coordinates = None
+        rotation_angle = 0
         if best_rect is not None:
             box = np.int0(cv2.boxPoints(best_rect))
-            roi = getROI(box)  # Use your actual ROI extraction here.
+            roi = getROI(box)  # Replace with actual ROI extraction if needed.
             img_center = getCenter(best_rect, roi, size, self.square_length)
             world_coordinates = convertCoordinate(img_center[0], img_center[1], size)
             rotation_angle = best_rect[2]
             cv2.drawContours(annotated_img, [box], -1, (0, 0, 255), 2)
             cv2.putText(annotated_img, f'{world_coordinates}', (min(box[0, 0], box[2, 0]), box[2, 1] - 10),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 1)
-            detected = True
-            detected_color = best_color
-
         return annotated_img, world_coordinates, detected_color, rotation_angle
 
     def update_accumulation(self, world_coords, detected_color, rotation_angle):
@@ -191,44 +196,158 @@ class ExtendedBlockDetector:
         else:
             self.reset_accumulation()
 
-        # Draw detected color text at the bottom.
         cv2.putText(annotated_img, "Color: " + (detected_color if detected_color is not None else "None"),
                     (10, img.shape[0] - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.65, (0, 0, 0), 2)
 
-        # For palletizing mode, add an extra instruction message.
         if self.mode == 'palletizing':
             cv2.putText(annotated_img, "Make sure no blocks in the stacking area", 
                         (15, int(img.shape[0] / 2)), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 0, 255), 2)
         return annotated_img
 
 # ---------------------------
-# Simple Demonstration Program
+# Motion Control Class
+# ---------------------------
+class MotionController:
+    def __init__(self):
+        """
+        Initializes the motion controller with an ArmIK instance,
+        the gripper servo value, and predefined placement coordinates.
+        """
+        self.AK = ArmIK()
+        self.servo1 = SERVO1
+        self.placement_coords = {
+            'red':   (-15 + 0.5, 12 - 0.5, 1.5),
+            'green': (-15 + 0.5, 6 - 0.5,  1.5),
+            'blue':  (-15 + 0.5, 0 - 0.5,  1.5),
+        }
+        self.first_move = True
+        self.unreachable = False
+
+    def init_arm(self):
+        """
+        Moves the arm to its initial position.
+        """
+        Board.setBusServoPulse(1, self.servo1 - 50, 300)
+        Board.setBusServoPulse(2, 500, 500)
+        self.AK.setPitchRangeMoving((0, 10, 10), -30, -30, -90, 1500)
+
+    def set_buzzer(self, duration):
+        """
+        Activates the buzzer for the given duration.
+        """
+        Board.setBuzzer(0)
+        Board.setBuzzer(1)
+        time.sleep(duration)
+        Board.setBuzzer(0)
+
+    def move_to_block(self, world_coords):
+        """
+        Moves the arm above the detected block (with a small Y offset).
+        """
+        x, y = world_coords
+        result = self.AK.setPitchRangeMoving((x, y - 2, 5), -90, -90, 0)
+        if result:
+            time.sleep(result[2] / 1000)
+        else:
+            self.unreachable = True
+
+    def pick_block(self, world_coords, rotation_angle):
+        """
+        Performs the pick-up sequence:
+         - Opens the gripper,
+         - Adjusts the wrist based on rotation,
+         - Lowers the arm,
+         - Closes the gripper,
+         - Raises the arm.
+        """
+        Board.setBusServoPulse(1, self.servo1 - 280, 500)
+        servo2_angle = getAngle(world_coords[0], world_coords[1], rotation_angle)
+        Board.setBusServoPulse(2, servo2_angle, 500)
+        time.sleep(0.8)
+        self.AK.setPitchRangeMoving((world_coords[0], world_coords[1], 2), -90, -90, 0, 1000)
+        time.sleep(2)
+        Board.setBusServoPulse(1, self.servo1, 500)
+        time.sleep(1)
+        Board.setBusServoPulse(2, 500, 500)
+        self.AK.setPitchRangeMoving((world_coords[0], world_coords[1], 12), -90, -90, 0, 1000)
+        time.sleep(1)
+
+    def place_block(self, color):
+        """
+        Moves the arm to the placement coordinate for the given color,
+        releases the block, and returns the arm to its initial position.
+        """
+        coord = self.placement_coords[color]
+        result = self.AK.setPitchRangeMoving((coord[0], coord[1], 12), -90, -90, 0)
+        if result:
+            time.sleep(result[2] / 1000)
+        servo2_angle = getAngle(coord[0], coord[1], -90)
+        Board.setBusServoPulse(2, servo2_angle, 500)
+        time.sleep(0.5)
+        self.AK.setPitchRangeMoving((coord[0], coord[1], coord[2] + 3), -90, -90, 0, 500)
+        time.sleep(0.5)
+        self.AK.setPitchRangeMoving((coord[0], coord[1], coord[2]), -90, -90, 0, 1000)
+        time.sleep(0.8)
+        Board.setBusServoPulse(1, self.servo1 - 200, 500)
+        time.sleep(0.8)
+        self.AK.setPitchRangeMoving((coord[0], coord[1], 12), -90, -90, 0, 800)
+        time.sleep(0.8)
+        self.init_arm()
+        time.sleep(1.5)
+
+    def perform_pick_and_place(self, world_coords, detected_color, rotation_angle):
+        """
+        High-level method that performs the full pick-and-place operation.
+        """
+        if detected_color is None or world_coords is None:
+            return
+        self.move_to_block(world_coords)
+        self.pick_block(world_coords, rotation_angle)
+        self.place_block(detected_color)
+
+# Helper function to mimic getAngle from ArmIK.Transform
+def getAngle(x, y, angle):
+    # In practice, compute the required servo angle.
+    # Here, we return a placeholder value.
+    return 500
+
+# ---------------------------
+# MAIN INTEGRATED DEMO PROGRAM
 # ---------------------------
 if __name__ == '__main__':
-    # Define LAB color ranges (example values—replace with your calibrated values)
+    # Define LAB color ranges (replace with your calibrated values)
     color_range = {
         'red':   (np.array([20, 150, 150]), np.array([255, 200, 200])),
         'green': (np.array([0, 150, 150]),  np.array([150, 255, 150])),
         'blue':  (np.array([0, 150, 150]),  np.array([150, 150, 255])),
     }
     target_colors = ('red', 'green', 'blue')
-    square_length = 10  # Calibration parameter
+    square_length = 10
 
-    # Choose the mode: 'sorting' or 'palletizing'
+    # Instantiate the perception and motion modules.
     detector = ExtendedBlockDetector(target_colors, color_range, square_length, mode='sorting')
+    motion = MotionController()
+    motion.init_arm()
 
-    # Open the camera using your custom Camera module
+    # Open the camera using your custom Camera module.
     my_camera = Camera.Camera()
     my_camera.camera_open()
 
+    print("Press SPACE to trigger pick-and-place; ESC to exit.")
     while True:
         frame = my_camera.frame
         if frame is not None:
-            processed = detector.process_frame(frame, size=(640, 480))
-            cv2.imshow("Extended Detection", processed)
-        key = cv2.waitKey(1)
-        if key == 27:  # Exit on ESC key
-            break
+            annotated = detector.process_frame(frame, size=(640, 480))
+            cv2.imshow("Integrated Pick and Place", annotated)
+            key = cv2.waitKey(1)
+            if key == 32:  # SPACE key triggers pick-and-place.
+                # Use a fixed rotation angle for simplicity.
+                rotation_angle = 0
+                # The detector.detect_block method returns the latest detection.
+                _, world_coords, detected_color, rotation_angle = detector.detect_block(frame, size=(640, 480))
+                motion.perform_pick_and_place(world_coords, detected_color, rotation_angle)
+            if key == 27:  # ESC key to exit.
+                break
 
     my_camera.camera_close()
     cv2.destroyAllWindows()
