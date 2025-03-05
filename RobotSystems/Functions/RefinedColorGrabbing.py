@@ -1,26 +1,37 @@
 #!/usr/bin/python3
+# coding=utf8
+import sys
+sys.path.append('/home/pi/ArmPi/')
 import cv2
+import time
+import threading
 import numpy as np
 import math
-import time
-import Camera  # Your custom Camera module
+import Camera
+from LABConfig import *
+from ArmIK.Transform import *
+from ArmIK.ArmMoveIK import *
+import HiwonderSDK.Board as Board
+from CameraCalibration.CalibrationConfig import *
 
-# For demonstration, we supply dummy implementations.
-# In your actual system, these should come from your calibration modules.
+# Dummy calibration functions (replace with your actual implementations)
 def getROI(box):
-    # Dummy: simply return the box as the region of interest.
     return box
 
 def getCenter(rect, roi, size, square_length):
-    # Dummy: use the center from cv2.minAreaRect.
     return rect[0]
 
 def convertCoordinate(img_centerx, img_centery, size):
-    # Dummy: simple scaling conversion.
     img_w, img_h = size
     world_x = (img_centerx - img_w / 2) * 10 / img_w
     world_y = (img_centery - img_h / 2) * 10 / img_h
     return (round(world_x, 2), round(world_y, 2))
+
+# Global gripper servo value
+SERVO1 = 500
+
+# Set your desired operation mode: "sorting" or "stacking"
+OPERATION_MODE = "sorting"  # Change to "stacking" for stacking mode
 
 # ---------------------------
 # Extended Perception Class
@@ -32,7 +43,7 @@ class ExtendedBlockDetector:
         :param target_colors: Tuple of target color names (e.g., ('red','green','blue')).
         :param color_range: Dict mapping each color to its (lower, upper) LAB thresholds.
         :param square_length: Calibration parameter for coordinate conversion.
-        :param mode: Either 'sorting' or 'palletizing' (affects accumulation thresholds and annotations).
+        :param mode: 'sorting' or 'palletizing' (affects accumulation thresholds and annotations).
         """
         self.target_colors = target_colors
         self.color_range = color_range
@@ -75,27 +86,20 @@ class ExtendedBlockDetector:
 
     def detect_block(self, img, size=(640, 480)):
         """
-        Performs the basic detection steps:
-          1. Preprocess the image and convert to LAB color space.
-          2. For each target color, create a mask and find the largest contour.
-          3. Choose the best candidate (largest valid contour among target colors).
-          4. Compute the rotated bounding box, ROI, and convert the center to world coordinates.
-        Returns:
-          (annotated image, world coordinates, detected color, rotation angle)
+        Detects a block by:
+          1. Preprocessing and converting the image to LAB.
+          2. For each target color, creating a mask and finding the largest contour.
+          3. Selecting the best candidate (largest contour above threshold).
+          4. Computing the rotated bounding box, ROI, and converting the center to world coordinates.
+        Returns: (annotated image, world coordinates, detected color, rotation angle)
         """
         annotated_img = img.copy()
         preprocessed = self.preprocess_image(img, size)
         lab_img = self.convert_to_lab(preprocessed)
-        detected = False
-        world_coordinates = None
         detected_color = None
-        rotation_angle = 0
-
         best_area = 0
         best_rect = None
-        best_color = None
 
-        # Loop through all target colors and keep the detection with the largest area.
         for color in self.target_colors:
             mask = self.generate_color_mask(lab_img, color)
             contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
@@ -103,36 +107,29 @@ class ExtendedBlockDetector:
             if largest_contour is not None and area > 2500 and area > best_area:
                 best_area = area
                 best_rect = cv2.minAreaRect(largest_contour)
-                best_color = color
+                detected_color = color
 
+        world_coordinates = None
+        rotation_angle = 0
         if best_rect is not None:
             box = np.int0(cv2.boxPoints(best_rect))
-            roi = getROI(box)  # Use your actual ROI extraction here.
+            roi = getROI(box)
             img_center = getCenter(best_rect, roi, size, self.square_length)
             world_coordinates = convertCoordinate(img_center[0], img_center[1], size)
             rotation_angle = best_rect[2]
             cv2.drawContours(annotated_img, [box], -1, (0, 0, 255), 2)
-            cv2.putText(annotated_img, f'{world_coordinates}', (min(box[0, 0], box[2, 0]), box[2, 1] - 10),
+            cv2.putText(annotated_img, f'{world_coordinates}', (min(box[0, 0], box[2, 0]), box[2, 1]-10),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 1)
-            detected = True
-            detected_color = best_color
-
         return annotated_img, world_coordinates, detected_color, rotation_angle
 
     def update_accumulation(self, world_coords, detected_color, rotation_angle):
-        """
-        Updates the accumulation lists with the current detection.
-        Also computes the distance from the last detection (if any).
-        """
         if self.last_world_coords is not None:
             dist = math.sqrt((world_coords[0] - self.last_world_coords[0])**2 +
                              (world_coords[1] - self.last_world_coords[1])**2)
         else:
             dist = 0
         self.last_world_coords = world_coords
-
         self.center_list.append(world_coords)
-        # Map color to a numeric value: red=1, green=2, blue=3; otherwise 0.
         color_value = 0
         if detected_color == 'red':
             color_value = 1
@@ -146,14 +143,6 @@ class ExtendedBlockDetector:
             self.last_detection_time = time.time()
 
     def get_stable_detection(self):
-        """
-        Checks if detections have been accumulating over a threshold time.
-        If so, computes the average (stable) world coordinates and a majority color.
-        Threshold depends on the mode:
-            - 'sorting': 1 second
-            - 'palletizing': 0.5 second
-        Returns a tuple (avg_coords, avg_color) or None if not yet stable.
-        """
         time_threshold = 1.0 if self.mode == 'sorting' else 0.5
         if self.last_detection_time is None:
             return None
@@ -175,11 +164,6 @@ class ExtendedBlockDetector:
         return None
 
     def process_frame(self, img, size=(640, 480)):
-        """
-        Runs detection on the current frame, updates accumulation data, and
-        annotates the frame with a stable detection result when available.
-        In palletizing mode, an extra instruction is drawn.
-        """
         annotated_img, world_coords, detected_color, rotation_angle = self.detect_block(img, size)
         if world_coords is not None and detected_color is not None:
             self.update_accumulation(world_coords, detected_color, rotation_angle)
@@ -191,44 +175,174 @@ class ExtendedBlockDetector:
         else:
             self.reset_accumulation()
 
-        # Draw detected color text at the bottom.
         cv2.putText(annotated_img, "Color: " + (detected_color if detected_color is not None else "None"),
-                    (10, img.shape[0] - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.65, (0, 0, 0), 2)
-
-        # For palletizing mode, add an extra instruction message.
+                    (10, img.shape[0]-10), cv2.FONT_HERSHEY_SIMPLEX, 0.65, (0,0,0), 2)
         if self.mode == 'palletizing':
             cv2.putText(annotated_img, "Make sure no blocks in the stacking area", 
-                        (15, int(img.shape[0] / 2)), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 0, 255), 2)
+                        (15, int(img.shape[0]/2)), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0,0,255), 2)
         return annotated_img
 
 # ---------------------------
-# Simple Demonstration Program
+# Motion Control Class
+# ---------------------------
+class MotionController:
+    def __init__(self, mode="sorting"):
+        """
+        Initializes the motion controller with an ArmIK instance and mode.
+        For sorting mode, placement coordinates are set as before.
+        For stacking mode, coordinates are adjusted for stacking and height (z) is updated.
+        """
+        self.AK = ArmIK()
+        self.servo1 = SERVO1
+        self.mode = mode
+        if self.mode == "sorting":
+            self.placement_coords = {
+                'red':   (-15 + 0.5, 12 - 0.5, 1.5),
+                'green': (-15 + 0.5, 6 - 0.5, 1.5),
+                'blue':  (-15 + 0.5, 0 - 0.5, 1.5),
+            }
+        elif self.mode == "stacking":
+            # In stacking mode, the X and Y are fixed; only Z (height) changes.
+            self.placement_coords = {
+                'red':   (-15 + 1, -7 - 0.5, 1.5),
+                'green': (-15 + 1, -7 - 0.5, 1.5),
+                'blue':  (-15 + 1, -7 - 0.5, 1.5),
+            }
+            self.z = self.placement_coords['red'][2]  # Base height (assume same for all)
+            self.dz = 2.5  # Height increment per block
+        self.first_move = True
+        self.unreachable = False
+
+    def init_arm(self):
+        Board.setBusServoPulse(1, self.servo1 - 50, 300)
+        Board.setBusServoPulse(2, 500, 500)
+        self.AK.setPitchRangeMoving((0, 10, 10), -30, -30, -90, 1500)
+
+    def set_buzzer(self, duration):
+        Board.setBuzzer(0)
+        Board.setBuzzer(1)
+        time.sleep(duration)
+        Board.setBuzzer(0)
+
+    def move_to_block(self, world_coords):
+        x, y = world_coords
+        result = self.AK.setPitchRangeMoving((x, y - 2, 5), -90, -90, 0)
+        if result:
+            time.sleep(result[2] / 1000)
+        else:
+            self.unreachable = True
+
+    def pick_block(self, world_coords, rotation_angle):
+        Board.setBusServoPulse(1, self.servo1 - 280, 500)
+        servo2_angle = getAngle(world_coords[0], world_coords[1], rotation_angle)
+        Board.setBusServoPulse(2, servo2_angle, 500)
+        time.sleep(0.8)
+        self.AK.setPitchRangeMoving((world_coords[0], world_coords[1], 2), -90, -90, 0, 1000)
+        time.sleep(2)
+        Board.setBusServoPulse(1, self.servo1, 500)
+        time.sleep(1)
+        Board.setBusServoPulse(2, 500, 500)
+        self.AK.setPitchRangeMoving((world_coords[0], world_coords[1], 12), -90, -90, 0, 1000)
+        time.sleep(1)
+
+    def place_block(self, color, custom_z=None):
+        """
+        For sorting mode, custom_z is None and default placement coordinate is used.
+        For stacking mode, custom_z should be provided as the target Z height.
+        """
+        coord = self.placement_coords[color]
+        if custom_z is not None:
+            target_z = custom_z
+        else:
+            target_z = coord[2]
+        result = self.AK.setPitchRangeMoving((coord[0], coord[1], 12), -90, -90, 0)
+        if result:
+            time.sleep(result[2] / 1000)
+        servo2_angle = getAngle(coord[0], coord[1], -90)
+        Board.setBusServoPulse(2, servo2_angle, 500)
+        time.sleep(0.5)
+        self.AK.setPitchRangeMoving((coord[0], coord[1], target_z + 3), -90, -90, 0, 500)
+        time.sleep(0.5)
+        self.AK.setPitchRangeMoving((coord[0], coord[1], target_z), -90, -90, 0, 1000)
+        time.sleep(0.8)
+        Board.setBusServoPulse(1, self.servo1 - 200, 500)
+        time.sleep(0.8)
+        self.AK.setPitchRangeMoving((coord[0], coord[1], 12), -90, -90, 0, 800)
+        time.sleep(0.8)
+        self.init_arm()
+        time.sleep(1.5)
+
+    def perform_pick_and_place(self, world_coords, detected_color, rotation_angle):
+        if detected_color is None or world_coords is None:
+            return
+        self.move_to_block(world_coords)
+        self.pick_block(world_coords, rotation_angle)
+        self.place_block(detected_color)
+
+    def perform_stack(self, world_coords, detected_color, rotation_angle):
+        """
+        In stacking mode, update the stacking height and then perform the pick-up
+        and placement at the current stacking level.
+        """
+        if detected_color is None or world_coords is None:
+            return
+        # Update stacking height:
+        current_z = self.z
+        self.z += self.dz
+        # Reset stacking height if reached a maximum (2*dz above base)
+        if self.z >= 2 * self.dz + self.placement_coords[detected_color][2]:
+            self.z = self.placement_coords[detected_color][2]
+        # Optionally, if the block is the first in a stack, wait to clear the area.
+        if current_z == self.placement_coords[detected_color][2]:
+            print("Waiting for stacking area to be clear...")
+            time.sleep(3)
+        self.move_to_block(world_coords)
+        self.pick_block(world_coords, rotation_angle)
+        self.place_block(detected_color, custom_z=self.z)
+
+# Helper function to mimic getAngle from ArmIK.Transform
+def getAngle(x, y, angle):
+    # Replace with an actual calculation if available.
+    return 500
+
+# ---------------------------
+# MAIN INTEGRATED DEMO PROGRAM
 # ---------------------------
 if __name__ == '__main__':
-    # Define LAB color ranges (example values—replace with your calibrated values)
+    # Define LAB color ranges with your working values.
     color_range = {
         'red':   (np.array([20, 150, 150]), np.array([255, 200, 200])),
-        'green': (np.array([0, 150, 150]),  np.array([150, 255, 150])),
-        'blue':  (np.array([0, 150, 150]),  np.array([150, 150, 255])),
+        'green': (np.array([20, 80, 40]),   np.array([110, 255, 150])),
+        'blue':  (np.array([20, 70, 150]),  np.array([110, 150, 255])),
     }
     target_colors = ('red', 'green', 'blue')
-    square_length = 10  # Calibration parameter
+    square_length = 10
 
-    # Choose the mode: 'sorting' or 'palletizing'
-    detector = ExtendedBlockDetector(target_colors, color_range, square_length, mode='sorting')
+    # Instantiate perception and motion modules with the chosen mode.
+    detector = ExtendedBlockDetector(target_colors, color_range, square_length, mode=OPERATION_MODE)
+    motion = MotionController(mode=OPERATION_MODE)
+    motion.init_arm()
 
-    # Open the camera using your custom Camera module
+    # Open the camera.
     my_camera = Camera.Camera()
     my_camera.camera_open()
 
+    print("Press SPACE to trigger pick-and-place/stacking; ESC to exit.")
     while True:
         frame = my_camera.frame
         if frame is not None:
-            processed = detector.process_frame(frame, size=(640, 480))
-            cv2.imshow("Extended Detection", processed)
-        key = cv2.waitKey(1)
-        if key == 27:  # Exit on ESC key
-            break
+            annotated = detector.process_frame(frame, size=(640,480))
+            cv2.imshow("Integrated Operation", annotated)
+            key = cv2.waitKey(1)
+            if key == 32:  # SPACE key
+                # Get the latest detection.
+                _, world_coords, detected_color, rotation_angle = detector.detect_block(frame, size=(640,480))
+                if OPERATION_MODE == "sorting":
+                    motion.perform_pick_and_place(world_coords, detected_color, rotation_angle)
+                elif OPERATION_MODE == "stacking":
+                    motion.perform_stack(world_coords, detected_color, rotation_angle)
+            if key == 27:  # ESC key
+                break
 
     my_camera.camera_close()
     cv2.destroyAllWindows()
