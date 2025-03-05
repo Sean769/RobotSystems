@@ -186,11 +186,6 @@ class ExtendedBlockDetector:
 # ---------------------------
 class MotionController:
     def __init__(self, mode="sorting"):
-        """
-        Initializes the motion controller with an ArmIK instance and mode.
-        In sorting mode, standard placement coordinates are used.
-        In stacking mode, the Z height is updated for stacking.
-        """
         self.AK = ArmIK()
         self.servo1 = SERVO1
         self.mode = mode
@@ -216,23 +211,23 @@ class MotionController:
         Board.setBusServoPulse(1, self.servo1 - 50, 300)
         Board.setBusServoPulse(2, 500, 500)
         self.AK.setPitchRangeMoving((0, 10, 10), -30, -30, -90, 1500)
-        time.sleep(1)  # Extra delay to ensure arm reaches the initial position
+        self.wait_for_motion(1.5)
 
-    def set_buzzer(self, duration):
-        Board.setBuzzer(0)
-        Board.setBuzzer(1)
-        time.sleep(duration)
-        Board.setBuzzer(0)
+    def wait_for_motion(self, duration):
+        # Wait in a loop to ensure the arm has finished moving.
+        print(f"Waiting for {duration} seconds for motion to complete...")
+        start = time.time()
+        while time.time() - start < duration:
+            time.sleep(0.05)
 
     def move_to_block(self, world_coords):
         x, y = world_coords
         print("Moving arm to block position:", world_coords)
-        # Move to the block's position; adjust Z value if needed.
-        result = self.AK.setPitchRangeMoving((x, y, 5), -90, -90, 0)
+        # Use the same offset as the original script.
+        result = self.AK.setPitchRangeMoving((x, y - 2, 5), -90, -90, 0)
         if result:
-            sleep_time = result[2] / 1000.0
-            print("Waiting", sleep_time, "seconds for move_to_block to complete")
-            time.sleep(sleep_time + 1)  # Extra delay added for settling
+            duration = result[2] / 1000.0
+            self.wait_for_motion(duration + 1)  # Extra delay for settling
         else:
             self.unreachable = True
 
@@ -245,14 +240,14 @@ class MotionController:
         time.sleep(0.8)
         print("Lowering arm to pick block...")
         self.AK.setPitchRangeMoving((world_coords[0], world_coords[1], 2), -90, -90, 0, 1000)
-        time.sleep(2)
+        self.wait_for_motion(2)
         print("Closing gripper to pick block...")
         Board.setBusServoPulse(1, self.servo1, 500)
-        time.sleep(1)
+        self.wait_for_motion(1)
         print("Lifting arm with block...")
         Board.setBusServoPulse(2, 500, 500)
         self.AK.setPitchRangeMoving((world_coords[0], world_coords[1], 12), -90, -90, 0, 1000)
-        time.sleep(1)
+        self.wait_for_motion(1)
 
     def place_block(self, color, custom_z=None):
         coord = self.placement_coords[color]
@@ -260,21 +255,20 @@ class MotionController:
         print("Moving to deposit position for", color, "block at Z =", target_z)
         result = self.AK.setPitchRangeMoving((coord[0], coord[1], 12), -90, -90, 0)
         if result:
-            sleep_time = result[2] / 1000.0
-            print("Waiting", sleep_time, "seconds for move to deposit position")
-            time.sleep(sleep_time + 0.5)
+            duration = result[2] / 1000.0
+            self.wait_for_motion(duration + 0.5)
         servo2_angle = getAngle(coord[0], coord[1], -90)
         Board.setBusServoPulse(2, servo2_angle, 500)
         time.sleep(0.5)
         self.AK.setPitchRangeMoving((coord[0], coord[1], target_z + 3), -90, -90, 0, 500)
-        time.sleep(0.5)
+        self.wait_for_motion(0.5)
         self.AK.setPitchRangeMoving((coord[0], coord[1], target_z), -90, -90, 0, 1000)
-        time.sleep(0.8)
+        self.wait_for_motion(0.8)
         print("Opening gripper to release block...")
         Board.setBusServoPulse(1, self.servo1 - 200, 500)
-        time.sleep(0.8)
+        self.wait_for_motion(0.8)
         self.AK.setPitchRangeMoving((coord[0], coord[1], 12), -90, -90, 0, 800)
-        time.sleep(0.8)
+        self.wait_for_motion(0.8)
         print("Returning arm to initial position...")
         self.init_arm()
 
@@ -330,14 +324,12 @@ if __name__ == '__main__':
         if frame is not None:
             annotated = detector.process_frame(frame, size=(640,480))
             cv2.imshow("Integrated Operation", annotated)
-            # Automatically check for a detection.
             _, world_coords, detected_color, rotation_angle = detector.detect_block(frame, size=(640,480))
             if world_coords is not None and detected_color is not None:
                 if OPERATION_MODE == "sorting":
                     motion.perform_pick_and_place(world_coords, detected_color, rotation_angle)
                 elif OPERATION_MODE == "stacking":
                     motion.perform_stack(world_coords, detected_color, rotation_angle)
-                # Extra delay to avoid repeated triggering for the same block.
                 time.sleep(2)
         if cv2.waitKey(1) == 27:
             break
