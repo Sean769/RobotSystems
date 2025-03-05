@@ -224,11 +224,24 @@ class MotionController:
 
     def move_to_block(self, world_coords):
         x, y = world_coords
-        result = self.AK.setPitchRangeMoving((x, y - 2, 5), -90, -90, 0)
+        print("Moving arm to block position:", world_coords)
+        # Move to the block position – note: adjust the Z value as needed.
+        result = self.AK.setPitchRangeMoving((x, y, 5), -90, -90, 0)
         if result:
             time.sleep(result[2] / 1000)
         else:
             self.unreachable = True
+
+    def perform_pick_and_place(self, world_coords, detected_color, rotation_angle):
+        if detected_color is None or world_coords is None:
+            return
+        print("Navigating to block at", world_coords)
+        self.move_to_block(world_coords)   # Now explicitly moves to the block's coordinates.
+        print("Executing pick-up sequence...")
+        self.pick_block(world_coords, rotation_angle)
+        print("Moving to deposit position and releasing block...")
+        self.place_block(detected_color)
+
 
     def pick_block(self, world_coords, rotation_angle):
         Board.setBusServoPulse(1, self.servo1 - 280, 500)
@@ -262,13 +275,6 @@ class MotionController:
         time.sleep(0.8)
         self.init_arm()
         time.sleep(1.5)
-
-    def perform_pick_and_place(self, world_coords, detected_color, rotation_angle):
-        if detected_color is None or world_coords is None:
-            return
-        self.move_to_block(world_coords)
-        self.pick_block(world_coords, rotation_angle)
-        self.place_block(detected_color)
 
     def perform_stack(self, world_coords, detected_color, rotation_angle):
         if detected_color is None or world_coords is None:
