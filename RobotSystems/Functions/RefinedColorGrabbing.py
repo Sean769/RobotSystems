@@ -30,8 +30,8 @@ def convertCoordinate(img_centerx, img_centery, size):
 # Global gripper servo value
 SERVO1 = 500
 
-# Set your desired operation mode: "sorting" or "stacking"
-OPERATION_MODE = "sorting"  # Change to "stacking" for stacking mode
+# Set operation mode: "sorting" or "stacking"
+OPERATION_MODE = "sorting"  # Change to "stacking" for stacking behavior
 
 # ---------------------------
 # Extended Perception Class
@@ -174,7 +174,6 @@ class ExtendedBlockDetector:
                             cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 0, 0), 2)
         else:
             self.reset_accumulation()
-
         cv2.putText(annotated_img, "Color: " + (detected_color if detected_color is not None else "None"),
                     (10, img.shape[0]-10), cv2.FONT_HERSHEY_SIMPLEX, 0.65, (0,0,0), 2)
         if self.mode == 'palletizing':
@@ -189,8 +188,8 @@ class MotionController:
     def __init__(self, mode="sorting"):
         """
         Initializes the motion controller with an ArmIK instance and mode.
-        For sorting mode, placement coordinates are set as before.
-        For stacking mode, coordinates are adjusted for stacking and height (z) is updated.
+        In sorting mode, standard placement coordinates are used.
+        In stacking mode, the Z height is updated for stacking.
         """
         self.AK = ArmIK()
         self.servo1 = SERVO1
@@ -202,14 +201,13 @@ class MotionController:
                 'blue':  (-15 + 0.5, 0 - 0.5, 1.5),
             }
         elif self.mode == "stacking":
-            # In stacking mode, the X and Y are fixed; only Z (height) changes.
             self.placement_coords = {
                 'red':   (-15 + 1, -7 - 0.5, 1.5),
                 'green': (-15 + 1, -7 - 0.5, 1.5),
                 'blue':  (-15 + 1, -7 - 0.5, 1.5),
             }
-            self.z = self.placement_coords['red'][2]  # Base height (assume same for all)
-            self.dz = 2.5  # Height increment per block
+            self.z = self.placement_coords['red'][2]
+            self.dz = 2.5
         self.first_move = True
         self.unreachable = False
 
@@ -246,15 +244,8 @@ class MotionController:
         time.sleep(1)
 
     def place_block(self, color, custom_z=None):
-        """
-        For sorting mode, custom_z is None and default placement coordinate is used.
-        For stacking mode, custom_z should be provided as the target Z height.
-        """
         coord = self.placement_coords[color]
-        if custom_z is not None:
-            target_z = custom_z
-        else:
-            target_z = coord[2]
+        target_z = custom_z if custom_z is not None else coord[2]
         result = self.AK.setPitchRangeMoving((coord[0], coord[1], 12), -90, -90, 0)
         if result:
             time.sleep(result[2] / 1000)
@@ -280,21 +271,14 @@ class MotionController:
         self.place_block(detected_color)
 
     def perform_stack(self, world_coords, detected_color, rotation_angle):
-        """
-        In stacking mode, update the stacking height and then perform the pick-up
-        and placement at the current stacking level.
-        """
         if detected_color is None or world_coords is None:
             return
-        # Update stacking height:
         current_z = self.z
         self.z += self.dz
-        # Reset stacking height if reached a maximum (2*dz above base)
         if self.z >= 2 * self.dz + self.placement_coords[detected_color][2]:
             self.z = self.placement_coords[detected_color][2]
-        # Optionally, if the block is the first in a stack, wait to clear the area.
         if current_z == self.placement_coords[detected_color][2]:
-            print("Waiting for stacking area to be clear...")
+            print("Waiting for stacking area to clear...")
             time.sleep(3)
         self.move_to_block(world_coords)
         self.pick_block(world_coords, rotation_angle)
@@ -302,7 +286,6 @@ class MotionController:
 
 # Helper function to mimic getAngle from ArmIK.Transform
 def getAngle(x, y, angle):
-    # Replace with an actual calculation if available.
     return 500
 
 # ---------------------------
@@ -318,31 +301,30 @@ if __name__ == '__main__':
     target_colors = ('red', 'green', 'blue')
     square_length = 10
 
-    # Instantiate perception and motion modules with the chosen mode.
     detector = ExtendedBlockDetector(target_colors, color_range, square_length, mode=OPERATION_MODE)
     motion = MotionController(mode=OPERATION_MODE)
     motion.init_arm()
 
-    # Open the camera.
     my_camera = Camera.Camera()
     my_camera.camera_open()
 
-    print("Press SPACE to trigger pick-and-place/stacking; ESC to exit.")
+    print("Automatically executing protocol upon detection; press ESC to exit.")
     while True:
         frame = my_camera.frame
         if frame is not None:
             annotated = detector.process_frame(frame, size=(640,480))
             cv2.imshow("Integrated Operation", annotated)
-            key = cv2.waitKey(1)
-            if key == 32:  # SPACE key
-                # Get the latest detection.
-                _, world_coords, detected_color, rotation_angle = detector.detect_block(frame, size=(640,480))
+            # Automatically check for a detection.
+            _, world_coords, detected_color, rotation_angle = detector.detect_block(frame, size=(640,480))
+            if world_coords is not None and detected_color is not None:
                 if OPERATION_MODE == "sorting":
                     motion.perform_pick_and_place(world_coords, detected_color, rotation_angle)
                 elif OPERATION_MODE == "stacking":
                     motion.perform_stack(world_coords, detected_color, rotation_angle)
-            if key == 27:  # ESC key
-                break
+                # Wait a moment after an operation to avoid repeated triggers.
+                time.sleep(2)
+        if cv2.waitKey(1) == 27:  # ESC key to exit.
+            break
 
     my_camera.camera_close()
     cv2.destroyAllWindows()
