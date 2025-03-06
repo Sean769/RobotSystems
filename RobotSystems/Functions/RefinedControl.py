@@ -12,8 +12,8 @@ from ArmIK.ArmMoveIK import *
 import HiwonderSDK.Board as Board
 from CameraCalibration.CalibrationConfig import *
 import Camera
-from detector import ExtendedBlockDetector
-from motion import MotionController
+from RefinedTracking import ExtendedBlockDetector
+from RefinedGrabbing import MotionController
 
 # Set operation mode: "sorting" or "stacking"
 OPERATION_MODE = "sorting"  # Change as needed
