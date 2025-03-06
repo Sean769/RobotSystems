@@ -57,7 +57,7 @@ class MotionController:
     def move_to_block(self, world_coords):
         x, y = world_coords
         print("Moving arm to block position:", world_coords)
-        result = self.AK.setPitchRangeMoving((x, y - 2, 5), -90, -90, 0)
+        result = self.AK.setPitchRangeMoving((x, y, 7), -90, -90, 0)
         if result:
             duration = result[2] / 1000.0
             self.wait_for_motion(duration + 1)
