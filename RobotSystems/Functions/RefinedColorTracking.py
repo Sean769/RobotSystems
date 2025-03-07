@@ -20,9 +20,8 @@ class ExtendedBlockDetector:
         """
         Initializes the extended detector.
         :param target_colors: Tuple of target color names (e.g., ('red','green','blue')).
-        :param color_range: Dict mapping each color to its (lower, upper) LAB thresholds.
+        :param color_range: Dict mapping each color to its (lower, upper) thresholds.
         :param square_length: Calibration parameter for coordinate conversion.
-        :param mode: Either 'sorting' or 'palletizing' (affects accumulation thresholds and annotations).
         """
         self.target_colors = target_colors
         self.color_range = color_range
@@ -133,12 +132,9 @@ class ExtendedBlockDetector:
         """
         Checks if detections have been accumulating over a threshold time.
         If so, computes the average (stable) world coordinates and a majority color.
-        Threshold depends on the mode:
-            - 'sorting': 1 second
-            - 'palletizing': 0.5 second
         Returns a tuple (avg_coords, avg_color) or None if not yet stable.
         """
-        time_threshold = 1.0 if self.mode == 'sorting' else 0.5
+        time_threshold = 1.0
         if self.last_detection_time is None:
             return None
         if time.time() - self.last_detection_time > time_threshold and self.count > 0:
@@ -162,7 +158,6 @@ class ExtendedBlockDetector:
         """
         Runs detection on the current frame, updates accumulation data, and
         annotates the frame with a stable detection result when available.
-        In palletizing mode, an extra instruction is drawn.
         """
         annotated_img, world_coords, detected_color, rotation_angle = self.detect_block(img, size)
         if world_coords is not None and detected_color is not None:
@@ -178,9 +173,6 @@ class ExtendedBlockDetector:
         cv2.putText(annotated_img, "Color: " + (detected_color if detected_color is not None else "None"),
                     (10, img.shape[0] - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.65, (0, 0, 0), 2)
 
-        if self.mode == 'palletizing':
-            cv2.putText(annotated_img, "Make sure no blocks in the stacking area", 
-                        (15, int(img.shape[0] / 2)), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 0, 255), 2)
         return annotated_img
 
 
