@@ -15,32 +15,29 @@ import HiwonderSDK.Board as Board
 from CameraCalibration.CalibrationConfig import *  # Must provide square_length and convertCoordinate
 import Camera
 
-# Global flag for arm motion (set True when the system is running)
-__isRunning = True
 servo1 = 500   # Base value for the pen (or gripper) control
-
 AK = ArmIK()
 
 # ----------------- Smiley Detector -----------------
 class SmileyDetector:
     def __init__(self):
-        # Define the image size (must match your camera output)
+        # Define a fixed image size (must match your camera output)
         self.size = (640, 480)
-        # These attributes store the detection results:
+        # Detection results
         self.current_shape = "None"   # "circle" when a circle is detected
-        self.img_center = (0, 0)        # Center of the detected circle in image coordinates
+        self.img_center = (0, 0)        # Center of detected circle (image coordinates)
         self.r = 0                    # Radius of the detected circle (in pixels)
-        self.world_x = 0              # X coordinate in world (cm)
-        self.world_y = 0              # Y coordinate in world (cm)
-        self.circle_radius = 0        # Same as self.r but for clarity
+        self.world_x = 0              # Converted world x coordinate (cm)
+        self.world_y = 0              # Converted world y coordinate (cm)
+        self.circle_radius = 0        # For clarity, same as self.r
 
     def process_frame(self, img):
-        # Resize the image to the defined size for consistent processing.
+        # Resize image for consistent processing.
         frame_resized = cv2.resize(img, self.size, interpolation=cv2.INTER_NEAREST)
-        # Convert to grayscale and apply median blur.
+        # Convert to grayscale and blur to reduce noise.
         gray = cv2.cvtColor(frame_resized, cv2.COLOR_BGR2GRAY)
         gray_blurred = cv2.medianBlur(gray, 5)
-        # Use Hough Circle Transform to detect circles.
+        # Detect circles using Hough Circle Transform.
         circles = cv2.HoughCircles(gray_blurred,
                                    cv2.HOUGH_GRADIENT,
                                    dp=1.2,
@@ -68,7 +65,7 @@ class SmileyDetector:
         return frame_resized
 
     def annotate_image(self, img):
-        # Draw the detected circle and overlay a smiley for visualization.
+        # Overlay a smiley face on the image if a circle is detected.
         if self.current_shape == "circle":
             x, y = self.img_center
             r = self.r
@@ -84,116 +81,93 @@ class SmileyDetector:
 class SmileyMoveHandler:
     def __init__(self, detector):
         self.detector = detector
-        # When start_pick_up is True, the move sequence will be triggered.
+        # When start_pick_up is True, the drawing sequence is triggered.
         self.start_pick_up = False
-        # Lock flag: when True, new detections are ignored until the drawing sequence is complete.
+        # Lock new detections until the current drawing is complete.
         self.drawing_in_progress = False
 
     def move(self):
-        global __isRunning, servo1, AK
         while True:
-            if __isRunning:
-                # When a circle has been detected and we have been told to start drawing,
-                # and no drawing is in progress, begin the drawing sequence.
-                if self.detector.current_shape != "None" and self.start_pick_up and not self.drawing_in_progress:
-                    self.drawing_in_progress = True
-                    print("Drawing sequence started...")
-                    # Retrieve the world coordinates and circle radius from the detector.
-                    wx = self.detector.world_x
-                    wy = self.detector.world_y
-                    r = self.detector.circle_radius
+            # If a circle is detected and we've been signaled to start drawing,
+            # and no drawing is in progress, execute the drawing sequence.
+            if self.detector.current_shape != "None" and self.start_pick_up and not self.drawing_in_progress:
+                self.drawing_in_progress = True
+                print("Drawing sequence started...")
+                wx = self.detector.world_x
+                wy = self.detector.world_y
+                r = self.detector.circle_radius
 
-                    # --- 1. Move above the circle center at safe height (7 cm) ---
-                    if not __isRunning:
-                        continue
-                    Board.setBusServoPulse(2, 500, 500)
-                    result = AK.setPitchRangeMoving((wx, wy, 7), -90, -90, 0, 1000)
+                # --- 1. Move above the circle center (safe height: 7 cm) ---
+                Board.setBusServoPulse(2, 500, 500)
+                result = AK.setPitchRangeMoving((wx, wy, 7), -90, -90, 0, 1000)
+                if result:
+                    time.sleep(result[2] / 1000)
+
+                # --- 2. Lower to drawing height (1.5 cm) ---
+                result = AK.setPitchRangeMoving((wx, wy, 1.5), -90, -90, 0, 1000)
+                if result:
+                    time.sleep(result[2] / 1000)
+
+                # --- 3. Draw left eye ---
+                eye_offset_pixels = r // 3
+                eye_offset_world = eye_offset_pixels * square_length  # Use calibration factor.
+                left_eye = (wx - eye_offset_world, wy - eye_offset_world, 1.5)
+                result = AK.setPitchRangeMoving(left_eye, -90, -90, 0, 1000)
+                if result:
+                    time.sleep(result[2] / 1000)
+                Board.setBusServoPulse(1, servo1, 500)   # Pen down (simulate drawing dot).
+                time.sleep(0.5)
+                Board.setBusServoPulse(1, servo1 - 70, 300)  # Pen up.
+                time.sleep(0.3)
+
+                # --- 4. Return to center ---
+                result = AK.setPitchRangeMoving((wx, wy, 1.5), -90, -90, 0, 1000)
+                if result:
+                    time.sleep(result[2] / 1000)
+
+                # --- 5. Draw right eye ---
+                right_eye = (wx + eye_offset_world, wy - eye_offset_world, 1.5)
+                result = AK.setPitchRangeMoving(right_eye, -90, -90, 0, 1000)
+                if result:
+                    time.sleep(result[2] / 1000)
+                Board.setBusServoPulse(1, servo1, 500)   # Pen down.
+                time.sleep(0.5)
+                Board.setBusServoPulse(1, servo1 - 70, 300)  # Pen up.
+                time.sleep(0.3)
+
+                # --- 6. Return to center before drawing smile ---
+                result = AK.setPitchRangeMoving((wx, wy, 1.5), -90, -90, 0, 1000)
+                if result:
+                    time.sleep(result[2] / 1000)
+
+                # --- 7. Draw the smile (arc) ---
+                smile_center = (wx, wy + (r // 8) * square_length)
+                smile_radius_world = (r // 2) * square_length
+                Board.setBusServoPulse(1, servo1, 500)  # Pen down for smile.
+                time.sleep(0.5)
+                num_points = 10
+                for i in range(num_points + 1):
+                    angle_deg = 20 + (140 * i / num_points)  # From 20° to 160°.
+                    angle_rad = math.radians(angle_deg)
+                    x = smile_center[0] + smile_radius_world * math.cos(angle_rad)
+                    y = smile_center[1] + smile_radius_world * math.sin(angle_rad)
+                    result = AK.setPitchRangeMoving((x, y, 1.5), -90, -90, 0, 1000)
                     if result:
                         time.sleep(result[2] / 1000)
+                time.sleep(0.5)
+                Board.setBusServoPulse(1, servo1 - 70, 300)  # Pen up after smile.
+                time.sleep(0.3)
 
-                    # --- 2. Lower to drawing height (1.5 cm) ---
-                    if not __isRunning:
-                        continue
-                    result = AK.setPitchRangeMoving((wx, wy, 1.5), -90, -90, 0, 1000)
-                    if result:
-                        time.sleep(result[2] / 1000)
+                # --- 8. Raise arm to safe height ---
+                result = AK.setPitchRangeMoving((wx, wy, 7), -90, -90, 0, 1000)
+                if result:
+                    time.sleep(result[2] / 1000)
 
-                    # --- 3. Draw left eye ---
-                    if not __isRunning:
-                        continue
-                    eye_offset_pixels = r // 3
-                    eye_offset_world = eye_offset_pixels * square_length  # Use calibration factor.
-                    left_eye = (wx - eye_offset_world, wy - eye_offset_world, 1.5)
-                    result = AK.setPitchRangeMoving(left_eye, -90, -90, 0, 1000)
-                    if result:
-                        time.sleep(result[2] / 1000)
-                    Board.setBusServoPulse(1, servo1, 500)   # Pen down (simulate dot).
-                    time.sleep(0.5)
-                    Board.setBusServoPulse(1, servo1 - 70, 300)  # Pen up.
-                    time.sleep(0.3)
-
-                    # --- 4. Return to center ---
-                    if not __isRunning:
-                        continue
-                    result = AK.setPitchRangeMoving((wx, wy, 1.5), -90, -90, 0, 1000)
-                    if result:
-                        time.sleep(result[2] / 1000)
-
-                    # --- 5. Draw right eye ---
-                    if not __isRunning:
-                        continue
-                    right_eye = (wx + eye_offset_world, wy - eye_offset_world, 1.5)
-                    result = AK.setPitchRangeMoving(right_eye, -90, -90, 0, 1000)
-                    if result:
-                        time.sleep(result[2] / 1000)
-                    Board.setBusServoPulse(1, servo1, 500)   # Pen down.
-                    time.sleep(0.5)
-                    Board.setBusServoPulse(1, servo1 - 70, 300)  # Pen up.
-                    time.sleep(0.3)
-
-                    # --- 6. Return to center before drawing smile ---
-                    if not __isRunning:
-                        continue
-                    result = AK.setPitchRangeMoving((wx, wy, 1.5), -90, -90, 0, 1000)
-                    if result:
-                        time.sleep(result[2] / 1000)
-
-                    # --- 7. Draw the smile (arc) ---
-                    if not __isRunning:
-                        continue
-                    smile_center = (wx, wy + (r // 8) * square_length)
-                    smile_radius_world = (r // 2) * square_length
-                    Board.setBusServoPulse(1, servo1, 500)  # Pen down for smile.
-                    time.sleep(0.5)
-                    num_points = 10
-                    for i in range(num_points + 1):
-                        if not __isRunning:
-                            continue
-                        angle_deg = 20 + (140 * i / num_points)  # From 20° to 160°.
-                        angle_rad = math.radians(angle_deg)
-                        x = smile_center[0] + smile_radius_world * math.cos(angle_rad)
-                        y = smile_center[1] + smile_radius_world * math.sin(angle_rad)
-                        result = AK.setPitchRangeMoving((x, y, 1.5), -90, -90, 0, 1000)
-                        if result:
-                            time.sleep(result[2] / 1000)
-                    time.sleep(0.5)
-                    Board.setBusServoPulse(1, servo1 - 70, 300)  # Pen up after smile.
-                    time.sleep(0.3)
-
-                    # --- 8. Raise arm to safe height ---
-                    if not __isRunning:
-                        continue
-                    result = AK.setPitchRangeMoving((wx, wy, 7), -90, -90, 0, 1000)
-                    if result:
-                        time.sleep(result[2] / 1000)
-
-                    # --- 9. Reset detection flags ---
-                    self.detector.current_shape = "None"
-                    self.start_pick_up = False
-                    self.drawing_in_progress = False
-                    print("Drawing sequence completed.")
-                else:
-                    time.sleep(0.01)
+                # --- 9. Reset detection flags ---
+                self.detector.current_shape = "None"
+                self.start_pick_up = False
+                self.drawing_in_progress = False
+                print("Drawing sequence completed.")
             else:
                 time.sleep(0.01)
 
@@ -204,15 +178,14 @@ def initMove():
     AK.setPitchRangeMoving((0, 10, 10), -30, -30, -90, 1500)
 
 if __name__ == '__main__':
-    # Initialize the arm and set it to the initial position.
+    # Initialize the robot arm.
     initMove()
-    __isRunning = True
 
-    # Initialize the detector and move handler.
+    # Initialize detector and move handler.
     detector = SmileyDetector()
     move_handler = SmileyMoveHandler(detector)
 
-    # Start the arm motion thread.
+    # Start the move handler thread.
     move_thread = threading.Thread(target=move_handler.move)
     move_thread.daemon = True
     move_thread.start()
@@ -224,12 +197,10 @@ if __name__ == '__main__':
     while True:
         img = my_camera.frame
         if img is not None:
-            # Process the frame for circle (smiley) detection.
             processed_frame = detector.process_frame(img)
-            # Annotate the frame for visualization.
             annotated_img = detector.annotate_image(processed_frame)
             cv2.imshow('Smiley Detection', annotated_img)
-            # Once a circle is detected, signal the move handler to start drawing.
+            # When a circle is detected, signal the move handler.
             if detector.current_shape != "None":
                 move_handler.start_pick_up = True
         if cv2.waitKey(1) == 27:
