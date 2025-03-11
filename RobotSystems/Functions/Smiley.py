@@ -12,7 +12,7 @@ from LABConfig import *
 from ArmIK.Transform import *
 from ArmIK.ArmMoveIK import *
 import HiwonderSDK.Board as Board
-from CameraCalibration.CalibrationConfig import *  # Assumes definitions for square_length and convertCoordinate
+from CameraCalibration.CalibrationConfig import *  # Must provide square_length and convertCoordinate
 
 if sys.version_info.major == 2:
     print('Please run this program with python3!')
@@ -26,17 +26,17 @@ __isRunning = False
 _stop = False
 unreachable = False
 get_roi = False
-# For this application, detect_color is used as a flag ("circle") once a circle is detected.
+# Here, detect_color is used as a flag (set to "circle") once a circle is detected.
 detect_color = 'None'
-start_pick_up = False  # Indicates that the detected circle is stable and ready for drawing
-rotation_angle = 0     # (Unused here, but kept for compatibility)
+start_pick_up = False  # Set to True when the detected circle is stable and ready for drawing
+rotation_angle = 0     # (Unused in this example, but kept for structure compatibility)
 world_X, world_Y = 0, 0  # World coordinates of the detected circle center
-circle_radius = 0      # Detected circle radius in pixels (used for scaling drawing features)
-drawing_in_progress = False  # Locks detection while drawing is in progress
+circle_radius = 0      # Detected circle radius (in pixels) for scaling drawing features
+drawing_in_progress = False  # When True, detection is locked until drawing completes
 
 # ---------------- Arm and Board Initialization ----------------
 def initMove():
-    Board.setBusServoPulse(1, servo1 - 50, 500)
+    Board.setBusServoPulse(1, servo1 - 50, 300)
     Board.setBusServoPulse(2, 500, 500)
     AK.setPitchRangeMoving((0, 10, 10), -30, -30, -90, 1500)
 
@@ -66,10 +66,11 @@ def move():
     while True:
         if __isRunning:
             if detect_color != 'None' and start_pick_up and not drawing_in_progress:
-                # Lock the drawing location before beginning the drawing sequence.
+                # Lock detection so that new circles are ignored until drawing is done.
                 drawing_in_progress = True
-                
-                # --- 1. Move above the circle center (safe height) ---
+                print("Drawing sequence started...")
+
+                # --- 1. Move above the circle center (safe height: 7 cm) ---
                 if not __isRunning:
                     continue
                 Board.setBusServoPulse(2, 500, 500)
@@ -77,7 +78,7 @@ def move():
                 if result:
                     time.sleep(result[2] / 1000)
                 
-                # --- 2. Lower to drawing height ---
+                # --- 2. Lower to drawing height (1.5 cm) ---
                 if not __isRunning:
                     continue
                 result = AK.setPitchRangeMoving((world_X, world_Y, 1.5), -90, -90, 0, 1000)
@@ -93,7 +94,7 @@ def move():
                 result = AK.setPitchRangeMoving(left_eye, -90, -90, 0, 1000)
                 if result:
                     time.sleep(result[2] / 1000)
-                Board.setBusServoPulse(1, servo1, 500)   # Pen down (simulate dot)
+                Board.setBusServoPulse(1, servo1, 500)   # Pen down (simulate drawing a dot)
                 time.sleep(0.5)
                 Board.setBusServoPulse(1, servo1 - 70, 300)  # Pen up
                 time.sleep(0.3)
@@ -157,6 +158,7 @@ def move():
                 detect_color = 'None'
                 start_pick_up = False
                 drawing_in_progress = False
+                print("Drawing sequence completed.")
             else:
                 time.sleep(0.01)
         else:
@@ -192,11 +194,11 @@ def run(img):
     """
     Processes the camera frame to detect a circle.
     When a circle is stably detected and no drawing is in progress,
-    its center and radius are converted to world coordinates,
-    and the global flags are set so that the move() thread triggers the drawing sequence.
+    its center and radius are converted to world coordinates and the global
+    flags are set so that the move() thread triggers the drawing sequence.
     """
     global detect_color, start_pick_up, world_X, world_Y, circle_radius, drawing_in_progress
-    # If drawing is in progress, skip updating detection.
+    # If a drawing sequence is in progress, do not update detection.
     if drawing_in_progress:
         return img
     img_copy = img.copy()
@@ -213,10 +215,11 @@ def run(img):
                                maxRadius=0)
     if circles is not None:
         circles = np.uint16(np.around(circles))
+        # Process the first detected circle
         for circle in circles[0, :]:
             x, y, r = circle
             img_copy = draw_smiley_overlay(img_copy, (x, y), r)
-            # Lock the current detection: convert image coordinates to world coordinates.
+            # Lock this detection: convert image coordinates to world coordinates.
             world_x, world_y = convertCoordinate(x, y, (img.shape[1], img.shape[0]))
             world_X, world_Y = world_x, world_y
             circle_radius = r
