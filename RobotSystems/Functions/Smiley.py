@@ -85,72 +85,96 @@ class SmileyMoveHandler:
                 wy = self.detector.world_y
                 r = self.detector.circle_radius  # radius in pixels
 
-                # 1. Move above the circle center (safe height: 7 cm)
+                # 1. Move above the circle center at safe height (7 cm)
+                center_safe = (wx, wy, 7)
                 Board.setBusServoPulse(2, 500, 500)
-                result = AK.setPitchRangeMoving((wx, wy, 7), -90, -90, 0, 1000)
-                print("Step 1 (Move above):", (wx, wy, 7), "Result:", result)
+                result = AK.setPitchRangeMoving(center_safe, -90, -90, 0, 1000)
+                print("Step 1 (Move above circle center):", center_safe, "Result:", result)
                 time.sleep(1.0)
 
-                # 2. Lower to drawing height (1.5 cm)
-                result = AK.setPitchRangeMoving((wx, wy, 1.5), -90, -90, 0, 1000)
-                print("Step 2 (Lower to drawing height):", (wx, wy, 1.5), "Result:", result)
-                time.sleep(1.0)
-
-                # 3. Draw left eye
-                # Convert pixel offset to cm using map_param_
+                # 2. Draw left eye:
                 eye_offset_world = (r / 3.0) * map_param_
-                left_eye = (wx - eye_offset_world, wy - eye_offset_world, 1.5)
-                result = AK.setPitchRangeMoving(left_eye, -90, -90, 0, 1000)
-                print("Step 3 (Left eye):", left_eye, "Result:", result)
+                left_eye_safe = (wx - eye_offset_world, wy - eye_offset_world, 7)
+                left_eye_draw = (wx - eye_offset_world, wy - eye_offset_world, 1.5)
+                # Navigate to left eye at safe height
+                result = AK.setPitchRangeMoving(left_eye_safe, -90, -90, 0, 1000)
+                print("Step 2 (Navigate to left eye safe):", left_eye_safe, "Result:", result)
                 time.sleep(1.0)
-                Board.setBusServoPulse(1, servo1, 500)   # Pen down
-                time.sleep(0.5)
-                Board.setBusServoPulse(1, servo1 - 70, 300)  # Pen up
-                time.sleep(0.3)
-
-                # 4. Return to center
-                result = AK.setPitchRangeMoving((wx, wy, 1.5), -90, -90, 0, 1000)
-                print("Step 4 (Return to center):", (wx, wy, 1.5), "Result:", result)
+                # Lower to drawing height at left eye and mark the dot
+                result = AK.setPitchRangeMoving(left_eye_draw, -90, -90, 0, 1000)
+                print("Step 3 (Lower to drawing height at left eye):", left_eye_draw, "Result:", result)
                 time.sleep(1.0)
-
-                # 5. Draw right eye
-                right_eye = (wx + eye_offset_world, wy - eye_offset_world, 1.5)
-                result = AK.setPitchRangeMoving(right_eye, -90, -90, 0, 1000)
-                print("Step 5 (Right eye):", right_eye, "Result:", result)
-                time.sleep(1.0)
-                Board.setBusServoPulse(1, servo1, 500)   # Pen down
-                time.sleep(0.5)
-                Board.setBusServoPulse(1, servo1 - 70, 300)  # Pen up
-                time.sleep(0.3)
-
-                # 6. Return to center before drawing smile
-                result = AK.setPitchRangeMoving((wx, wy, 1.5), -90, -90, 0, 1000)
-                print("Step 6 (Return to center for smile):", (wx, wy, 1.5), "Result:", result)
+                # Raise back to safe height at left eye
+                result = AK.setPitchRangeMoving(left_eye_safe, -90, -90, 0, 1000)
+                print("Step 4 (Raise back to safe height at left eye):", left_eye_safe, "Result:", result)
                 time.sleep(1.0)
 
-                # 7. Draw the smile (arc)
+                # 3. Draw right eye:
+                # Return to circle center safe
+                result = AK.setPitchRangeMoving(center_safe, -90, -90, 0, 1000)
+                print("Step 5 (Return to circle center safe):", center_safe, "Result:", result)
+                time.sleep(1.0)
+                right_eye_safe = (wx + eye_offset_world, wy - eye_offset_world, 7)
+                right_eye_draw = (wx + eye_offset_world, wy - eye_offset_world, 1.5)
+                # Navigate to right eye at safe height
+                result = AK.setPitchRangeMoving(right_eye_safe, -90, -90, 0, 1000)
+                print("Step 6 (Navigate to right eye safe):", right_eye_safe, "Result:", result)
+                time.sleep(1.0)
+                # Lower to drawing height at right eye and mark the dot
+                result = AK.setPitchRangeMoving(right_eye_draw, -90, -90, 0, 1000)
+                print("Step 7 (Lower to drawing height at right eye):", right_eye_draw, "Result:", result)
+                time.sleep(1.0)
+                # Raise back to safe height at right eye
+                result = AK.setPitchRangeMoving(right_eye_safe, -90, -90, 0, 1000)
+                print("Step 8 (Raise back to safe height at right eye):", right_eye_safe, "Result:", result)
+                time.sleep(1.0)
+
+                # 4. Draw the smile:
+                # Return to circle center safe before starting the smile
+                result = AK.setPitchRangeMoving(center_safe, -90, -90, 0, 1000)
+                print("Step 9 (Return to circle center safe for smile):", center_safe, "Result:", result)
+                time.sleep(1.0)
+                # Define smile arc parameters
                 smile_center = (wx, wy + (r / 8.0) * map_param_)
                 smile_radius_world = (r / 2.0) * map_param_
-                Board.setBusServoPulse(1, servo1, 500)  # Pen down
-                time.sleep(0.5)
                 num_points = 10
-                for i in range(num_points + 1):
+                # Determine the first smile point at safe height
+                angle_deg = 20  # starting angle
+                angle_rad = math.radians(angle_deg)
+                first_smile_safe = (smile_center[0] + smile_radius_world * math.cos(angle_rad),
+                                     smile_center[1] + smile_radius_world * math.sin(angle_rad),
+                                     7)
+                first_smile_draw = (first_smile_safe[0], first_smile_safe[1], 1.5)
+                # Navigate to first smile point at safe height
+                result = AK.setPitchRangeMoving(first_smile_safe, -90, -90, 0, 1000)
+                print("Step 10 (Navigate to first smile point safe):", first_smile_safe, "Result:", result)
+                time.sleep(1.0)
+                # Lower to drawing height at first smile point
+                result = AK.setPitchRangeMoving(first_smile_draw, -90, -90, 0, 1000)
+                print("Step 11 (Lower to drawing height at first smile point):", first_smile_draw, "Result:", result)
+                time.sleep(1.0)
+                # Draw the remaining smile points while staying at drawing height
+                for i in range(1, num_points + 1):
                     angle_deg = 20 + (140 * i / num_points)
                     angle_rad = math.radians(angle_deg)
-                    x = smile_center[0] + smile_radius_world * math.cos(angle_rad)
-                    y = smile_center[1] + smile_radius_world * math.sin(angle_rad)
-                    result = AK.setPitchRangeMoving((x, y, 1.5), -90, -90, 0, 1000)
-                    print("Step 7 (Smile point", i, "):", (x, y, 1.5), "Result:", result)
+                    draw_point = (smile_center[0] + smile_radius_world * math.cos(angle_rad),
+                                  smile_center[1] + smile_radius_world * math.sin(angle_rad),
+                                  1.5)
+                    result = AK.setPitchRangeMoving(draw_point, -90, -90, 0, 1000)
+                    print("Step 12 (Draw smile point", i, "at drawing height):", draw_point, "Result:", result)
                     time.sleep(1.0)
-                Board.setBusServoPulse(1, servo1 - 70, 300)  # Pen up after smile
-                time.sleep(0.3)
-
-                # 8. Raise arm to safe height
-                result = AK.setPitchRangeMoving((wx, wy, 7), -90, -90, 0, 1000)
-                print("Step 8 (Raise arm):", (wx, wy, 7), "Result:", result)
+                # After finishing the smile, raise from the last smile point to safe height
+                last_smile_safe = (draw_point[0], draw_point[1], 7)
+                result = AK.setPitchRangeMoving(last_smile_safe, -90, -90, 0, 1000)
+                print("Step 13 (Raise to safe height at end of smile):", last_smile_safe, "Result:", result)
                 time.sleep(1.0)
 
-                # 9. Reset detection flags
+                # 5. Final move: Return to final safe position (0, 0, 10)
+                result = AK.setPitchRangeMoving((0, 0, 10), -90, -90, 0, 1000)
+                print("Final move (Return to safe position 0,0,10):", (0, 0, 10), "Result:", result)
+                time.sleep(1.0)
+
+                # Reset detection flags
                 self.detector.current_shape = "None"
                 self.start_pick_up = False
                 self.drawing_in_progress = False
@@ -162,7 +186,7 @@ class SmileyMoveHandler:
 def initMove():
     Board.setBusServoPulse(1, servo1 - 50, 300)
     Board.setBusServoPulse(2, 500, 500)
-    AK.setPitchRangeMoving((0, 10, 10), 30, 30, 90, 1500)
+    AK.setPitchRangeMoving((0, 0, 10), 30, 30, 90, 1500)
 
 if __name__ == '__main__':
     initMove()
