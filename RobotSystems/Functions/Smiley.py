@@ -43,7 +43,6 @@ class SmileyDetector:
                                    maxRadius=0)
         if circles is not None:
             circles = np.uint16(np.around(circles))
-            # Process the first detected circle.
             for circle in circles[0, :]:
                 x, y, r = circle
                 self.img_center = (x, y)
@@ -88,57 +87,57 @@ class SmileyMoveHandler:
 
                 # 1. Move above the circle center (safe height: 7 cm)
                 Board.setBusServoPulse(2, 500, 500)
+                AK.setPitchRangeMoving((wx, wy, 7), -90, -90, 0, 1000)
                 result = AK.setPitchRangeMoving((wx, wy, 7), -90, -90, 0, 1000)
                 print("Step 1 (Move above):", (wx, wy, 7), "Result:", result)
-                if result:
-                    time.sleep(result[2] / 1000)
+                time.sleep(1.0)
 
                 # 2. Lower to drawing height (1.5 cm)
+                AK.setPitchRangeMoving((wx, wy, 1.5), -90, -90, 0, 1000)
                 result = AK.setPitchRangeMoving((wx, wy, 1.5), -90, -90, 0, 1000)
-                print("Step 2 (Lower):", (wx, wy, 1.5), "Result:", result)
-                if result:
-                    time.sleep(result[2] / 1000)
+                print("Step 2 (Lower to drawing height):", (wx, wy, 1.5), "Result:", result)
+                time.sleep(1.0)
 
                 # 3. Draw left eye
                 eye_offset_pixels = r // 3
                 eye_offset_world = eye_offset_pixels * square_length
                 left_eye = (wx - eye_offset_world, wy - eye_offset_world, 1.5)
+                AK.setPitchRangeMoving(left_eye, -90, -90, 0, 1000)
                 result = AK.setPitchRangeMoving(left_eye, -90, -90, 0, 1000)
                 print("Step 3 (Left eye):", left_eye, "Result:", result)
-                if result:
-                    time.sleep(result[2] / 1000)
+                time.sleep(1.0)
                 Board.setBusServoPulse(1, servo1, 500)   # Pen down
                 time.sleep(0.5)
                 Board.setBusServoPulse(1, servo1 - 70, 300)  # Pen up
                 time.sleep(0.3)
 
                 # 4. Return to center
+                AK.setPitchRangeMoving((wx, wy, 1.5), -90, -90, 0, 1000)
                 result = AK.setPitchRangeMoving((wx, wy, 1.5), -90, -90, 0, 1000)
-                print("Step 4 (Return center):", (wx, wy, 1.5), "Result:", result)
-                if result:
-                    time.sleep(result[2] / 1000)
+                print("Step 4 (Return to center):", (wx, wy, 1.5), "Result:", result)
+                time.sleep(1.0)
 
                 # 5. Draw right eye
                 right_eye = (wx + eye_offset_world, wy - eye_offset_world, 1.5)
+                AK.setPitchRangeMoving(right_eye, -90, -90, 0, 1000)
                 result = AK.setPitchRangeMoving(right_eye, -90, -90, 0, 1000)
                 print("Step 5 (Right eye):", right_eye, "Result:", result)
-                if result:
-                    time.sleep(result[2] / 1000)
+                time.sleep(1.0)
                 Board.setBusServoPulse(1, servo1, 500)   # Pen down
                 time.sleep(0.5)
                 Board.setBusServoPulse(1, servo1 - 70, 300)  # Pen up
                 time.sleep(0.3)
 
                 # 6. Return to center before drawing smile
+                AK.setPitchRangeMoving((wx, wy, 1.5), -90, -90, 0, 1000)
                 result = AK.setPitchRangeMoving((wx, wy, 1.5), -90, -90, 0, 1000)
-                print("Step 6 (Center for smile):", (wx, wy, 1.5), "Result:", result)
-                if result:
-                    time.sleep(result[2] / 1000)
+                print("Step 6 (Return to center for smile):", (wx, wy, 1.5), "Result:", result)
+                time.sleep(1.0)
 
                 # 7. Draw the smile (arc)
                 smile_center = (wx, wy + (r // 8) * square_length)
                 smile_radius_world = (r // 2) * square_length
-                Board.setBusServoPulse(1, servo1, 500)  # Pen down for smile
+                Board.setBusServoPulse(1, servo1, 500)  # Pen down
                 time.sleep(0.5)
                 num_points = 10
                 for i in range(num_points + 1):
@@ -146,19 +145,18 @@ class SmileyMoveHandler:
                     angle_rad = math.radians(angle_deg)
                     x = smile_center[0] + smile_radius_world * math.cos(angle_rad)
                     y = smile_center[1] + smile_radius_world * math.sin(angle_rad)
+                    AK.setPitchRangeMoving((x, y, 1.5), -90, -90, 0, 1000)
                     result = AK.setPitchRangeMoving((x, y, 1.5), -90, -90, 0, 1000)
                     print("Step 7 (Smile point", i, "):", (x, y, 1.5), "Result:", result)
-                    if result:
-                        time.sleep(result[2] / 1000)
-                time.sleep(0.5)
+                    time.sleep(1.0)
                 Board.setBusServoPulse(1, servo1 - 70, 300)  # Pen up after smile
                 time.sleep(0.3)
 
                 # 8. Raise arm to safe height
+                AK.setPitchRangeMoving((wx, wy, 7), -90, -90, 0, 1000)
                 result = AK.setPitchRangeMoving((wx, wy, 7), -90, -90, 0, 1000)
                 print("Step 8 (Raise arm):", (wx, wy, 7), "Result:", result)
-                if result:
-                    time.sleep(result[2] / 1000)
+                time.sleep(1.0)
 
                 # 9. Reset detection flags
                 self.detector.current_shape = "None"
@@ -168,6 +166,17 @@ class SmileyMoveHandler:
             else:
                 time.sleep(0.01)
 
+# ----------------- Robot Position Printer -----------------
+def print_robot_position():
+    # This thread prints the robot's current position every 0.5 seconds.
+    while True:
+        try:
+            pos = AK.getXYZ()  # Replace with your actual method to get robot position
+            print("Current robot position:", pos)
+        except Exception as e:
+            print("Error reading robot position:", e)
+        time.sleep(0.5)
+
 # ----------------- Initialization and Main Loop -----------------
 def initMove():
     Board.setBusServoPulse(1, servo1 - 50, 300)
@@ -176,12 +185,17 @@ def initMove():
 
 if __name__ == '__main__':
     initMove()
+
     detector = SmileyDetector()
     move_handler = SmileyMoveHandler(detector)
 
     move_thread = threading.Thread(target=move_handler.move)
     move_thread.daemon = True
     move_thread.start()
+
+    pos_thread = threading.Thread(target=print_robot_position)
+    pos_thread.daemon = True
+    pos_thread.start()
 
     my_camera = Camera.Camera()
     my_camera.camera_open()
