@@ -43,6 +43,7 @@ class SmileyDetector:
                                    maxRadius=0)
         if circles is not None:
             circles = np.uint16(np.around(circles))
+            # Process the first detected circle.
             for circle in circles[0, :]:
                 x, y, r = circle
                 self.img_center = (x, y)
@@ -94,7 +95,7 @@ class SmileyMoveHandler:
 
                 # 2. Lower to drawing height (1.5 cm)
                 result = AK.setPitchRangeMoving((wx, wy, 1.5), -90, -90, 0, 1000)
-                print("Step 2 (Lower to drawing height):", (wx, wy, 1.5), "Result:", result)
+                print("Step 2 (Lower):", (wx, wy, 1.5), "Result:", result)
                 if result:
                     time.sleep(result[2] / 1000)
 
@@ -113,7 +114,7 @@ class SmileyMoveHandler:
 
                 # 4. Return to center
                 result = AK.setPitchRangeMoving((wx, wy, 1.5), -90, -90, 0, 1000)
-                print("Step 4 (Return to center):", (wx, wy, 1.5), "Result:", result)
+                print("Step 4 (Return center):", (wx, wy, 1.5), "Result:", result)
                 if result:
                     time.sleep(result[2] / 1000)
 
@@ -130,14 +131,14 @@ class SmileyMoveHandler:
 
                 # 6. Return to center before drawing smile
                 result = AK.setPitchRangeMoving((wx, wy, 1.5), -90, -90, 0, 1000)
-                print("Step 6 (Return to center for smile):", (wx, wy, 1.5), "Result:", result)
+                print("Step 6 (Center for smile):", (wx, wy, 1.5), "Result:", result)
                 if result:
                     time.sleep(result[2] / 1000)
 
                 # 7. Draw the smile (arc)
                 smile_center = (wx, wy + (r // 8) * square_length)
                 smile_radius_world = (r // 2) * square_length
-                Board.setBusServoPulse(1, servo1, 500)  # Pen down
+                Board.setBusServoPulse(1, servo1, 500)  # Pen down for smile
                 time.sleep(0.5)
                 num_points = 10
                 for i in range(num_points + 1):
@@ -167,17 +168,6 @@ class SmileyMoveHandler:
             else:
                 time.sleep(0.01)
 
-# ----------------- Robot Position Printer -----------------
-def print_robot_position():
-    # This thread prints the robot's current position every 0.5 seconds.
-    while True:
-        try:
-            pos = AK.getXYZ()  # Replace with your actual method to get robot position
-            print("Current robot position:", pos)
-        except Exception as e:
-            print("Error reading robot position:", e)
-        time.sleep(0.5)
-
 # ----------------- Initialization and Main Loop -----------------
 def initMove():
     Board.setBusServoPulse(1, servo1 - 50, 300)
@@ -186,17 +176,12 @@ def initMove():
 
 if __name__ == '__main__':
     initMove()
-
     detector = SmileyDetector()
     move_handler = SmileyMoveHandler(detector)
 
     move_thread = threading.Thread(target=move_handler.move)
     move_thread.daemon = True
     move_thread.start()
-
-    pos_thread = threading.Thread(target=print_robot_position)
-    pos_thread.daemon = True
-    pos_thread.start()
 
     my_camera = Camera.Camera()
     my_camera.camera_open()
