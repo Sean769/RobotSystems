@@ -166,16 +166,6 @@ class SmileyMoveHandler:
             else:
                 time.sleep(0.01)
 
-# ----------------- Robot Position Printer -----------------
-def print_robot_position():
-    # This thread prints the robot's current position every 0.5 seconds.
-    while True:
-        try:
-            pos = AK.getXYZ()  # Replace with your actual method to get robot position
-            print("Current robot position:", pos)
-        except Exception as e:
-            print("Error reading robot position:", e)
-        time.sleep(0.5)
 
 # ----------------- Initialization and Main Loop -----------------
 def initMove():
@@ -192,10 +182,6 @@ if __name__ == '__main__':
     move_thread = threading.Thread(target=move_handler.move)
     move_thread.daemon = True
     move_thread.start()
-
-    pos_thread = threading.Thread(target=print_robot_position)
-    pos_thread.daemon = True
-    pos_thread.start()
 
     my_camera = Camera.Camera()
     my_camera.camera_open()
