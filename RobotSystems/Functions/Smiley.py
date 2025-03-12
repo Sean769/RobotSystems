@@ -26,13 +26,12 @@ __isRunning = False
 _stop = False
 unreachable = False
 get_roi = False
-# For this application, detect_color is used as a flag ("circle") once a circle is detected.
+# For this application, we use detect_color as a flag to indicate a stable circle ("circle")
 detect_color = 'None'
 start_pick_up = False  # Indicates that the detected circle is stable and ready for drawing
 rotation_angle = 0     # (Unused here, but kept for compatibility)
 world_X, world_Y = 0, 0  # World coordinates of the detected circle center
 circle_radius = 0      # Detected circle radius in pixels (used for scaling drawing features)
-drawing_in_progress = False  # Locks detection while drawing is in progress
 
 # ---------------- Arm and Board Initialization ----------------
 def initMove():
@@ -62,13 +61,10 @@ def exit_program():
 # ---------------- Arm-Control Thread ----------------
 def move():
     global _stop, get_roi, unreachable, __isRunning, detect_color, start_pick_up
-    global rotation_angle, world_X, world_Y, circle_radius, drawing_in_progress
+    global rotation_angle, world_X, world_Y, circle_radius
     while True:
         if __isRunning:
-            if detect_color != 'None' and start_pick_up and not drawing_in_progress:
-                # Lock the drawing location before beginning the drawing sequence.
-                drawing_in_progress = True
-                
+            if detect_color != 'None' and start_pick_up:
                 # --- 1. Move above the circle center (safe height) ---
                 if not __isRunning:
                     continue
@@ -93,7 +89,8 @@ def move():
                 result = AK.setPitchRangeMoving(left_eye, -90, -90, 0, 1000)
                 if result:
                     time.sleep(result[2] / 1000)
-                Board.setBusServoPulse(1, servo1, 500)   # Pen down (simulate dot)
+                # Simulate dot: lower pen then lift it
+                Board.setBusServoPulse(1, servo1, 500)   # Pen down
                 time.sleep(0.5)
                 Board.setBusServoPulse(1, servo1 - 70, 300)  # Pen up
                 time.sleep(0.3)
@@ -156,7 +153,6 @@ def move():
                 # --- 9. Reset detection flags ---
                 detect_color = 'None'
                 start_pick_up = False
-                drawing_in_progress = False
             else:
                 time.sleep(0.01)
         else:
@@ -191,14 +187,10 @@ def draw_smiley_overlay(img, center, radius):
 def run(img):
     """
     Processes the camera frame to detect a circle.
-    When a circle is stably detected and no drawing is in progress,
-    its center and radius are converted to world coordinates,
+    When a circle is stably detected, its center and radius are converted to world coordinates,
     and the global flags are set so that the move() thread triggers the drawing sequence.
     """
-    global detect_color, start_pick_up, world_X, world_Y, circle_radius, drawing_in_progress
-    # If drawing is in progress, skip updating detection.
-    if drawing_in_progress:
-        return img
+    global detect_color, start_pick_up, world_X, world_Y, circle_radius
     img_copy = img.copy()
     gray = cv2.cvtColor(img_copy, cv2.COLOR_BGR2GRAY)
     gray_blurred = cv2.medianBlur(gray, 5)
@@ -216,7 +208,7 @@ def run(img):
         for circle in circles[0, :]:
             x, y, r = circle
             img_copy = draw_smiley_overlay(img_copy, (x, y), r)
-            # Lock the current detection: convert image coordinates to world coordinates.
+            # Convert the circle center from image coordinates to world coordinates.
             world_x, world_y = convertCoordinate(x, y, (img.shape[1], img.shape[0]))
             world_X, world_Y = world_x, world_y
             circle_radius = r
