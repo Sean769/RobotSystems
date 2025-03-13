@@ -52,8 +52,8 @@ class MoveHandler:
             # Stacking placement coordinates (x, y, base z)
             self.place_coords = {
                 'red':   (-15 + 1, -7 - 0.5, 1.5),
-                'green': (-15 + 1, -7 - 0.5, 1.5),
-                'blue':  (-15 + 1, -7 - 0.5, 1.5),
+                'green': (-15 + 1, -7 - 0.5, 3),
+                'blue':  (-15 + 1, -7 - 0.5, 4.5),
             }
             self.stack_increment = 2.5
             # For each color, maintain the current stacking height
